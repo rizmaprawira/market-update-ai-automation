@@ -1,0 +1,127 @@
+TASK: Akuisisi Laporan Keuangan Bulanan Perusahaan Asuransi/Reasuransi
+RUNNER: Codex CLI (`codex exec`)
+MODE: Non-interaktif batch, fokus hasil file sesuai kontrak.
+
+WEBSITE_URL: {WEBSITE_URL}
+PERIODE_TARGET: {PERIODE}
+PERIODE_PRIOR: {PERIODE_PRIOR}
+OUTPUT_DIR_PERIODE: {OUTPUT_DIR}
+COMPANY_DIR: {COMPANY_DIR}
+COMPANY_SNAKE_CASE: {COMPANY_SNAKE_CASE}
+
+TARGET OUTPUT FILE:
+- JSON lengkap: {JSON_OUTPUT_FILE}
+- CSV 2 baris: {CSV_OUTPUT_FILE}
+- Status: {STATUS_FILE}
+- Database terpusat: {OUTPUT_DIR}/database_konsolidasi.csv
+
+TUJUAN:
+1. Temukan laporan keuangan bulanan untuk periode {PERIODE} dari URL target.
+2. Download laporan (prioritas PDF) ke `{COMPANY_DIR}/laporan_keuangan.pdf`.
+3. Ekstrak seluruh informasi penting PDF ke JSON hybrid lengkap.
+4. Ekstrak 12 metrik kunci ke CSV 2 baris: current ({PERIODE}) + prior ({PERIODE_PRIOR}).
+5. Tulis status proses yang valid.
+6. Append CSV individual ke database terpusat jika status BERHASIL/PARSIAL.
+
+LANGKAH WAJIB:
+
+1) TEMUKAN LAPORAN
+- Buka website `{WEBSITE_URL}`.
+- Cari publikasi bulanan untuk periode `{PERIODE}`.
+- Jika ada beberapa dokumen, pilih dokumen laporan keuangan yang paling lengkap.
+
+2) DOWNLOAD FILE
+- Unduh PDF ke `{COMPANY_DIR}/laporan_keuangan.pdf`.
+- Jika PDF tidak tersedia tapi ada format lain yang relevan, tetap lanjutkan ekstraksi dari sumber terbaik.
+
+3) EKSTRAK KE JSON HYBRID (WAJIB SIMPAN MESKI PARSIAL)
+Simpan ke `{JSON_OUTPUT_FILE}` dengan struktur ini:
+
+{
+  "extraction_metadata": {
+    "source_url": "...",
+    "target_periode": "{PERIODE}",
+    "prior_periode": "{PERIODE_PRIOR}",
+    "extracted_at": "ISO-8601",
+    "extraction_status": "complete|partial|failed"
+  },
+  "company_info": {
+    "nama_perusahaan": "...",
+    "jenis_asuransi": "Asuransi Umum|Asuransi Jiwa|Reasuransi",
+    "periode_laporan": "...",
+    "mata_uang": "..."
+  },
+  "raw_text": "teks mentah penting dari PDF (boleh diringkas tapi tetap representatif)",
+  "sections": {
+    "balance_sheet": {"...": "..."},
+    "income_statement": {"...": "..."},
+    "ratios": {"...": "..."},
+    "other_sections": {"...": "..."}
+  },
+  "key_metrics": {
+    "aset": {"current": "...", "prior": "..."},
+    "ekuitas": {"current": "...", "prior": "..."},
+    "premi_penutupan_tidak_langsung": {"current": "...", "prior": "..."},
+    "premi_bruto": {"current": "...", "prior": "..."},
+    "pendapatan_premi": {"current": "...", "prior": "..."},
+    "hasil_underwriting": {"current": "...", "prior": "..."},
+    "laba_rugi_komprehensif": {"current": "...", "prior": "..."},
+    "rasio_solvabilitas": {"current": "...", "prior": "..."},
+    "rasio_likuiditas": {"current": "...", "prior": "..."}
+  },
+  "extraction_notes": {
+    "sections_found": [],
+    "sections_not_found": [],
+    "parsing_issues": [],
+    "missing_fields": {},
+    "assumptions": [],
+    "warnings": []
+  }
+}
+
+4) TRANSFORM KE CSV 2 BARIS (PIPE-DELIMITED)
+Simpan ke `{CSV_OUTPUT_FILE}` dengan aturan:
+- Tepat 2 baris (tanpa header)
+- Tepat 12 kolom per baris
+- Delimiter `|`
+- Nilai numerik tanpa unit (hapus "rupiah", "%", dll)
+- Gunakan pemisah ribuan titik jika angka besar (contoh: 7.288.332)
+- Jika tidak ditemukan: `N/A`
+- Jika rugi, gunakan tanda minus (contoh: -29.397)
+
+Schema kolom:
+periode|jenis_asuransi|nama_perusahaan|aset|ekuitas|premi_penutupan_tidak_langsung|premi_bruto|pendapatan_premi|hasil_underwriting|laba_rugi_komprehensif|rasio_solvabilitas|rasio_likuiditas
+
+Baris 1 harus periode `{PERIODE}`
+Baris 2 harus periode `{PERIODE_PRIOR}`
+
+5) TULIS STATUS
+Simpan ke `{STATUS_FILE}`.
+Isi harus tepat satu kata:
+- BERHASIL
+- PARSIAL
+- TIDAK_DITEMUKAN
+- GAGAL
+
+Aturan status:
+- BERHASIL: CSV valid 2x12 dan tidak ada `N/A`
+- PARSIAL: CSV valid 2x12 tetapi ada minimal satu `N/A`
+- TIDAK_DITEMUKAN: laporan periode target tidak tersedia
+- GAGAL: error teknis atau gagal menghasilkan output valid
+
+6) APPEND KE DATABASE TERPUSAT
+- Target file: `{OUTPUT_DIR}/database_konsolidasi.csv`
+- Jika file belum ada, buat header ini terlebih dulu:
+  `periode|jenis_asuransi|nama_perusahaan|aset|ekuitas|premi_penutupan_tidak_langsung|premi_bruto|pendapatan_premi|hasil_underwriting|laba_rugi_komprehensif|rasio_solvabilitas|rasio_likuiditas`
+- Jika status BERHASIL atau PARSIAL: append 2 baris dari `{CSV_OUTPUT_FILE}`
+- Jika status TIDAK_DITEMUKAN atau GAGAL: jangan append
+- Jangan duplicate row yang sama persis jika sudah ada
+
+ATURAN KRITIS:
+- Jangan halusinasi angka. Jika tidak ada di sumber, gunakan `N/A` + catat di `extraction_notes.missing_fields`.
+- Jika laporan periode target tidak ditemukan, status `TIDAK_DITEMUKAN`.
+- Jika error teknis (akses/download/parsing gagal), status `GAGAL`.
+- JSON harus tetap dibuat walaupun proses parsial/gagal.
+- Gunakan nama file sesuai kontrak:
+  - `{COMPANY_SNAKE_CASE}_raw.json`
+  - `{COMPANY_SNAKE_CASE}_row.csv`

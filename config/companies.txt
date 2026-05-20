@@ -1,0 +1,19 @@
+# Master list URL sumber laporan keuangan perusahaan reasuransi(1 URL per line)
+# Format: full report listing URL; urutan ini dipakai orchestration script.
+
+# 1. PT Indoperkasa Suksesjaya Reasuransi
+https://inare.co.id/en/report/
+# 2. PT Maskapai Reasuransi Indonesia
+https://marein-re.com/laporan-keuangan
+# 3. PT Orion Reasuransi Indonesia
+https://www.orionre.id/assets/dokumen/publikasi/bulanan/
+# 4. PT Reasuransi Indonesia Utama
+https://www.indonesiare.co.id/id/investor-relations/financial-report
+# 5. PT Reasuransi Maipark Indonesia
+https://maipark.com/id/corporate/laporan?financePage=1&type=financial&yearlyPage=1
+# 6. PT Reasuransi Nasional Indonesia
+https://nasionalre.id/laporan-tahunan
+# 7. PT Reasuransi Nusantara Makmur
+https://nusantarare.com/report/
+# 8. PT Tugu Reasuransi Indonesia
+https://www.tugure.id/id/financial/monthly?page=1

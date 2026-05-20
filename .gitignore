@@ -1,0 +1,30 @@
+# Track only source/config/docs; ignore generated outputs and local artifacts
+
+# Generated data (all periods, company outputs, plots, reports)
+data/
+archive/
+
+# Logs and env
+*.log
+.env
+.env.*
+
+# Python
+*.pyc
+__pycache__/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.bak
