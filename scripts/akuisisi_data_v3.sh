@@ -25,7 +25,7 @@ set -o pipefail
 JUMLAH_KOLOM_CSV=12
 MAX_RETRIES=2                      # Retry teknis per URL
 RETRY_DELAY_SECONDS=3
-DEFAULT_MODEL="gpt-5.5"
+DEFAULT_MODEL="gpt-5.3-codex"
 DEFAULT_APPROVAL_POLICY="never"
 DEFAULT_SANDBOX_MODE="workspace-write"
 PROMPT_TEMPLATE_PATH="docs/codex_exec_prompt_v3.txt"
@@ -84,7 +84,7 @@ Flags wajib:
   --companies <file>        File URL input (1 URL per line, boleh ada komentar #)
 
 Flags opsional:
-  --model <nama_model>      Model Codex (default: gpt-5.5)
+  --model <nama_model>      Model Codex (default: gpt-5.3-codex)
   --approval-policy <mode>  Approval policy Codex: untrusted|on-request|on-failure|never (default: never)
   --sandbox <mode>          Sandbox Codex: read-only|workspace-write|danger-full-access (default: workspace-write)
   --delay <detik>           Jeda antar URL (default: 5)

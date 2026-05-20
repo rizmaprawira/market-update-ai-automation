@@ -15,7 +15,7 @@ Fokus v3: reliability, transparency, dan kesiapan scale dari prototype 8 URL ke 
 - `--YYYY <tahun>`: wajib, 4 digit
 - `--MM <bulan>`: wajib, format `01..12`
 - `--companies <file>`: wajib, 1 URL per baris, komentar `#` diizinkan
-- `--model <nama_model>`: opsional, default `gpt-5.5`
+- `--model <nama_model>`: opsional, default `gpt-5.3-codex`
 - `--approval-policy <mode>`: opsional, `untrusted|on-request|on-failure|never`, default `never`
 - `--sandbox <mode>`: opsional, `read-only|workspace-write|danger-full-access`, default `workspace-write`
 - `--delay <detik>`: opsional, default 5
@@ -92,7 +92,7 @@ TXT
   --YYYY 2026 \
   --MM 04 \
   --companies /tmp/one_url.txt \
-  --model gpt-5.5 \
+  --model gpt-5.3-codex \
   --approval-policy never \
   --sandbox workspace-write \
   --delay 0
@@ -104,7 +104,7 @@ TXT
   --YYYY 2026 \
   --MM 04 \
   --companies config/link_reasuransi.txt \
-  --model gpt-5.5 \
+  --model gpt-5.3-codex \
   --approval-policy never \
   --sandbox workspace-write \
   --delay 5

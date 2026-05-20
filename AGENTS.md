@@ -42,6 +42,6 @@ Rules:
 ## Runtime Defaults
 - Script entrypoint: `scripts/akuisisi_data_v3.sh`
 - Prompt template: `docs/codex_exec_prompt_v3.txt`
-- Model default: `gpt-5.5`
+- Model default: `gpt-5.3-codex`
 - Approval default: `never`
 - Sandbox default: `workspace-write`

@@ -8,7 +8,7 @@ Workflow v3 tetap mempertahankan kontrak output `data/YYYY-MM`, namun runtime de
 ### 1) Runner v3 dipindah ke Codex
 File: `scripts/akuisisi_data_v3.sh`
 - Engine eksekusi: `claude --print` -> `codex exec`
-- Default model: `gpt-5.5`
+- Default model: `gpt-5.3-codex`
 - Penambahan flag runtime:
   - `--approval-policy`
   - `--sandbox`

@@ -29,7 +29,7 @@ bash scripts/akuisisi_data_v3.sh \
   --YYYY 2026 \
   --MM 04 \
   --companies config/test_companies.txt \
-  --model gpt-5.5 \
+  --model gpt-5.3-codex \
   --approval-policy never \
   --sandbox workspace-write \
   --delay 0
@@ -42,7 +42,7 @@ bash scripts/akuisisi_data_v3.sh \
   --YYYY 2026 \
   --MM 04 \
   --companies config/link_reasuransi.txt \
-  --model gpt-5.5 \
+  --model gpt-5.3-codex \
   --approval-policy never \
   --sandbox workspace-write \
   --delay 5
@@ -55,7 +55,7 @@ bash scripts/akuisisi_data_v3.sh \
   --YYYY 2026 \
   --MM 04 \
   --companies config/companies.txt \
-  --model gpt-5.5 \
+  --model gpt-5.3-codex \
   --approval-policy never \
   --sandbox workspace-write \
   --delay 5
@@ -74,7 +74,7 @@ bash scripts/akuisisi_data_v3.sh \
   --YYYY 2026 \
   --MM 04 \
   --companies config/companies.txt \
-  --model gpt-5.5 \
+  --model gpt-5.3-codex \
   --approval-policy never \
   --sandbox workspace-write \
   --delay 5 \
@@ -85,7 +85,7 @@ bash scripts/akuisisi_data_v3.sh \
 - `--YYYY` (required): target year, 4 digits
 - `--MM` (required): target month, `01..12`
 - `--companies` (required): input URL list (one URL per line)
-- `--model` (optional): Codex model (default `gpt-5.5`)
+- `--model` (optional): Codex model (default `gpt-5.3-codex`)
 - `--approval-policy` (optional): `untrusted|on-request|on-failure|never` (default `never`)
 - `--sandbox` (optional): `read-only|workspace-write|danger-full-access` (default `workspace-write`)
 - `--delay` (optional): delay seconds between URLs (default `5`)

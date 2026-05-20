@@ -17,7 +17,7 @@
 Run a small non-interactive test:
 
 ```bash
-printf 'Balas dengan satu kata: OK' | codex --ask-for-approval never exec --skip-git-repo-check --model gpt-5.5 --sandbox workspace-write -
+printf 'Balas dengan satu kata: OK' | codex --ask-for-approval never exec --skip-git-repo-check --model gpt-5.3-codex --sandbox workspace-write -
 ```
 
 If this command returns a normal text response, Codex CLI is ready for automation.
@@ -47,7 +47,7 @@ bash scripts/akuisisi_data_v3.sh \
   --YYYY 2026 \
   --MM 04 \
   --companies config/test_companies.txt \
-  --model gpt-5.5 \
+  --model gpt-5.3-codex \
   --approval-policy never \
   --sandbox workspace-write \
   --delay 0
@@ -60,7 +60,7 @@ bash scripts/akuisisi_data_v3.sh \
   --YYYY 2026 \
   --MM 04 \
   --companies config/link_reasuransi.txt \
-  --model gpt-5.5 \
+  --model gpt-5.3-codex \
   --approval-policy never \
   --sandbox workspace-write \
   --delay 5
