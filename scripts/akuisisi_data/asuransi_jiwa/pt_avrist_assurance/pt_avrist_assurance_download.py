@@ -11,11 +11,37 @@ from _downloader_base import (
     fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp
 )
 
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:
+    sync_playwright = None
+
 LOGGER = logging.getLogger("download_pt_avrist_assurance")
 SOURCE_URL = "https://www.avrist.com/tentang-avrist-life/tentang-avrist-life?tab=Laporan+Perusahaan"
 COMPANY_ID = "pt_avrist_assurance"
 COMPANY_NAME = "PT Avrist Assurance"
 CATEGORY = "asuransi_jiwa"
+
+def fetch_avrist_pdfs_fast(url, timeout=30):
+    """Fetch Avrist PDFs with careful timing for dynamic Next.js content."""
+    if sync_playwright is None:
+        raise RuntimeError("Playwright not installed")
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=int(timeout * 1000 * 0.6))
+            page.wait_for_timeout(int(timeout * 1000 * 0.4))
+            html = page.content()
+            return html, page.url
+        except Exception:
+            page.wait_for_timeout(2000)
+            html = page.content()
+            return html, page.url
+        finally:
+            browser.close()
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
@@ -45,15 +71,10 @@ def main():
     debug_dir = output_dir / "_debug_html"
     
     LOGGER.info(f"Fetching from {SOURCE_URL}")
-    
+
     try:
-        if args.use_browser:
-            LOGGER.info("Using Playwright browser rendering")
-            html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
-        else:
-            html, discovered_url, used_browser = fetch_html_with_smart_fallback(
-                session, SOURCE_URL, args.year, args.month, args.timeout
-            )
+        LOGGER.info("Using fast browser rendering (domcontentloaded wait)")
+        html, discovered_url = fetch_avrist_pdfs_fast(SOURCE_URL, args.timeout)
     except Exception as e:
         reason = f"failed to fetch: {e}"
         LOGGER.error(reason)
