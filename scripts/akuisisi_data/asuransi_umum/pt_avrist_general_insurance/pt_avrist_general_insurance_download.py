@@ -9,14 +9,82 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from _downloader_base import (
     build_session, extract_pdf_links, download_pdf, write_manifest, write_debug_html,
-    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp
+    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp,
+    MONTH_LABELS
 )
 
 LOGGER = logging.getLogger("download_pt_avrist_general_insurance")
 SOURCE_URL = "https://www.avrist.com/tentang-avrist-life/tentang-avrist-life?tab=Laporan+Perusahaan"
+API_URL = "https://avrist.com/api-front/api/content/filter/lap-perusahaan"
 COMPANY_ID = "pt_avrist_general_insurance"
 COMPANY_NAME = "PT Avrist General Insurance"
 CATEGORY = "asuransi_umum"
+
+
+def find_avrist_pdf_url(year, month, session, timeout):
+    """Query Avrist API to find the PDF URL for a given month/year."""
+    import json
+
+    month_label = MONTH_LABELS[month]
+
+    payload = {
+        "includeAttributes": True,
+        "searchRequest": {
+            "keyword": "",
+            "fieldIds": ["nama-file-laporan"],
+            "postData": True
+        },
+        "filters": [],
+        "category": ""
+    }
+
+    try:
+        response = session.post(API_URL, json=payload, timeout=timeout)
+        response.raise_for_status()
+        data = response.json()
+
+        categories = data.get('data', {}).get('categoryList', {})
+
+        # Look in Laporan Keuangan for the month/year
+        for item in categories.get('Laporan Keuangan', []):
+            content = item.get('contentData', [])
+            title = item.get('title', '')
+
+            year_val = None
+            month_val = None
+            file_ref = None
+
+            for field in content:
+                field_id = field.get('fieldId', '')
+                value = field.get('value', '')
+
+                if field_id == 'tahun':
+                    year_val = value
+                elif field_id == 'bulan':
+                    month_val = value
+                elif field_id == 'file-laporan':
+                    file_ref = value
+
+            # Match year and month
+            if str(year_val) == str(year):
+                # Check if month matches (either full name or abbreviated)
+                if month_val and (month_val.lower() == month_label.lower() or month_val.lower() == month_label[:3].lower()):
+                    # Extract file URL from file_ref
+                    try:
+                        file_data = json.loads(file_ref)
+                        if isinstance(file_data, list) and len(file_data) > 0:
+                            img_url = file_data[0].get('imageUrl', '')
+                            if img_url:
+                                pdf_url = f"https://avrist.com/api-cms/files/get/{img_url}"
+                                LOGGER.info(f"Found API URL: {title}")
+                                return pdf_url
+                    except Exception as e:
+                        LOGGER.debug(f"Could not parse file reference: {e}")
+
+        return None
+    except Exception as e:
+        LOGGER.debug(f"API query failed: {e}")
+        return None
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
@@ -43,37 +111,13 @@ def main():
     output_pdf = output_dir / f"{COMPANY_ID}_{args.year:04d}_{args.month:02d}.pdf"
     debug_dir = output_dir / "_debug_html"
 
-    LOGGER.info(f"Fetching from {SOURCE_URL}")
+    LOGGER.info(f"Attempting API-based discovery for {period}")
+    pdf_url = find_avrist_pdf_url(args.year, args.month, session, args.timeout)
+    discovered_url = pdf_url or SOURCE_URL
 
-    try:
-        if args.use_browser:
-            LOGGER.info("Using Playwright browser rendering")
-            html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
-        else:
-            html, discovered_url, used_browser = fetch_html_with_smart_fallback(
-                session, SOURCE_URL, args.year, args.month, args.timeout
-            )
-    except Exception as e:
-        reason = f"failed to fetch: {e}"
-        LOGGER.error(reason)
-        if args.debug_html:
-            write_debug_html(debug_dir, "", reason)
-        write_manifest(output_dir, [{
-            "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
-            "source_page_url": SOURCE_URL, "discovered_page_url": SOURCE_URL,
-            "pdf_url": "", "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "error", "reason": reason,
-            "timestamp": current_timestamp()
-        }])
-        return 1
-
-    candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
-
-    if not candidates:
-        reason = "no PDF candidates found"
+    if not pdf_url:
+        reason = "no PDF found via API"
         LOGGER.warning(reason)
-        if args.debug_html:
-            write_debug_html(debug_dir, html, reason)
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
@@ -83,26 +127,25 @@ def main():
         }])
         return 1
 
-    selected_candidate = candidates[0]
-    LOGGER.info(f"Selected: {selected_candidate.text[:60]}")
+    LOGGER.info(f"Found PDF URL via API")
 
     if args.discover_only:
         LOGGER.info("Discovery complete (--discover-only mode)")
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-            "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+            "pdf_url": pdf_url, "target_year": args.year, "target_month": args.month,
             "output_path": str(output_pdf), "status": "discover_only", "reason": "discovery complete",
             "timestamp": current_timestamp()
         }])
         return 0
 
     if args.dry_run:
-        LOGGER.info(f"Dry-run: would download from {selected_candidate.url}")
+        LOGGER.info(f"Dry-run: would download from {pdf_url}")
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-            "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+            "pdf_url": pdf_url, "target_year": args.year, "target_month": args.month,
             "output_path": str(output_pdf), "status": "dry_run", "reason": "dry-run mode",
             "timestamp": current_timestamp()
         }])
@@ -113,14 +156,14 @@ def main():
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-            "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+            "pdf_url": pdf_url, "target_year": args.year, "target_month": args.month,
             "output_path": str(output_pdf), "status": "skipped_existing", "reason": "file exists",
             "timestamp": current_timestamp()
         }])
         return 0
 
     http_status, file_size = download_pdf(
-        session, selected_candidate.url, output_pdf, timeout=args.timeout, force=args.force
+        session, pdf_url, output_pdf, timeout=args.timeout, force=args.force
     )
 
     status = "downloaded" if http_status is not None else "skipped_existing"
@@ -133,7 +176,7 @@ def main():
     write_manifest(output_dir, [{
         "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
         "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-        "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+        "pdf_url": pdf_url, "target_year": args.year, "target_month": args.month,
         "output_path": str(output_pdf), "status": status, "reason": reason,
         "timestamp": current_timestamp()
     }])

@@ -115,18 +115,18 @@ def main():
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-            "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+            "pdf_url": pdf_url, "target_year": args.year, "target_month": args.month,
             "output_path": str(output_pdf), "status": "discover_only", "reason": "discovery complete",
             "timestamp": current_timestamp()
         }])
         return 0
 
     if args.dry_run:
-        LOGGER.info(f"Dry-run: would download from {selected_candidate.url}")
+        LOGGER.info(f"Dry-run: would download from {pdf_url}")
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-            "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+            "pdf_url": pdf_url, "target_year": args.year, "target_month": args.month,
             "output_path": str(output_pdf), "status": "dry_run", "reason": "dry-run mode",
             "timestamp": current_timestamp()
         }])
@@ -137,14 +137,14 @@ def main():
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-            "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+            "pdf_url": pdf_url, "target_year": args.year, "target_month": args.month,
             "output_path": str(output_pdf), "status": "skipped_existing", "reason": "file exists",
             "timestamp": current_timestamp()
         }])
         return 0
 
     http_status, file_size = download_pdf(
-        session, selected_candidate.url, output_pdf, timeout=args.timeout, force=args.force
+        session, pdf_url, output_pdf, timeout=args.timeout, force=args.force
     )
 
     status = "downloaded" if http_status is not None else "skipped_existing"
@@ -157,7 +157,7 @@ def main():
     write_manifest(output_dir, [{
         "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
         "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-        "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+        "pdf_url": pdf_url, "target_year": args.year, "target_month": args.month,
         "output_path": str(output_pdf), "status": status, "reason": reason,
         "timestamp": current_timestamp()
     }])

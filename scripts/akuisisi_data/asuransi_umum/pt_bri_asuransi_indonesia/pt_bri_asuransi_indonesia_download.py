@@ -9,7 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from _downloader_base import (
     build_session, extract_pdf_links, download_pdf, write_manifest, write_debug_html,
-    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp
+    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp,
+    discover_download_candidate
 )
 
 LOGGER = logging.getLogger("download_pt_bri_asuransi_indonesia")
@@ -68,7 +69,16 @@ def main():
         return 1
     
     candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
-    
+
+    # Fallback: deeper discovery if generic extraction fails
+    if not candidates:
+        try:
+            LOGGER.info("Generic extraction failed, trying deeper discovery")
+            candidate = discover_download_candidate(session, html, discovered_url, args.year, args.month, args.timeout)
+            candidates = [candidate]
+        except Exception as e:
+            LOGGER.debug(f"Deeper discovery failed: {e}")
+
     if not candidates:
         reason = "no PDF candidates found"
         LOGGER.warning(reason)
