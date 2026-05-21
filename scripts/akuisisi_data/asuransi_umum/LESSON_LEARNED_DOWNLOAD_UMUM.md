@@ -475,3 +475,50 @@ All scripts in Cohorts 2 & 3 now follow unified contract:
 
 **Applicable to:** All new script batches - standardization template works reliably when URLs are valid
 
+## 23) Standardization Testing: New 10-Script Cohort (2026-05-21)
+**Pattern confirmed with fresh cohort (AXA, Bosowa, BRI, China Taiping, Chubb, Citra, Great Eastern, Kookmin, Lippo, Malacca)**
+
+**Standardization completed:**
+- All 10 scripts fixed with unified contract (output path, filename format, CLI flags, manifest status enum, return codes)
+- sys.path.insert() bootstrap added to all scripts including Kookmin (missing in original)
+- Compile check: 100% success, no syntax errors
+- Path format: All now use `data/YYYY-MM/asuransi_umum/{company_id}/` (removed "raw_pdf" intermediate dir)
+- Filename format: All use `{company_id}_YYYY_MM.pdf`
+- API contract fixed: All now correctly handle `download_pdf()` returns `(http_status|None, file_size)`
+
+**Test results with period 2026-03:**
+- ✓ **4 WORK correctly** (40% success):
+  - AXA: March 2026 found ✓, downloaded (280 KB)
+  - Citra: March 2026 found ✓, downloaded (342 KB)
+  - Kookmin: Q1 2026 correct ✓, downloaded (2.9 MB)
+  - Malacca: March 2026 found ✓, downloaded (4.3 MB)
+
+- ⚠ **4 PERIOD MISMATCH** (confirmed lesson #21 issue):
+  - China Taiping: Found January 2026 instead of March (false positive)
+  - Chubb: Found January 2026 instead of March (false positive)
+  - Great Eastern: Found April 2026 instead of March (false positive)
+  - Lippo: Found April 2026 instead of March (false positive)
+  - Root cause: Generic `extract_pdf_links()` returns first high-scoring match; period filter insufficient when multiple months available
+  - Impact: Without period validation, 40% of attempts return wrong data silently
+
+- ✗ **2 NO PDF FOUND**:
+  - Bosowa: SSL certificate issue + no candidates found
+  - BRI: Generic extraction returns no candidates, browser fallback also fails
+
+**Key learnings:**
+1. **Standardization successful**: All 10 scripts now follow unified contract without exceptions
+2. **API contract correctness**: Proper handling of download_pdf() signature prevents silent failures
+3. **Period mismatch is system-wide**: 4 out of 6 successful discoveries return wrong month; affects all sites using generic extraction
+4. **Not a script bug but extraction limitation**: extract_pdf_links() designed for best-effort, not guaranteed accuracy
+5. **Need post-download validation**: For critical workflows, extract & verify text from PDF to confirm target period
+
+**Recommendations:**
+- For production: Add PDF text extraction post-download to validate period matches (see lesson #21 mitigation #3)
+- For now: 40% reliable success rate acceptable for exploratory/research phase; flag uncertain periods in manifest
+- Future enhancement: Site-specific period validation rules (override generic extraction with targeted checks)
+- Investigate Bosowa SSL: May need special headers or browser-based download
+- Investigate BRI: Check if page structure changed from expected patterns
+
+**Test evidence:**
+All manifests saved to `/tmp/test_results/2026-03/asuransi_umum/*/download_manifest.json` with correct status enums and reason fields.
+

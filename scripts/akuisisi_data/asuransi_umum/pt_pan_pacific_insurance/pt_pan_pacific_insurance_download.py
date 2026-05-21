@@ -10,6 +10,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from _downloader_base import (
     build_session, write_manifest, validate_pdf, current_timestamp,
     HEADERS, MONTH_LABELS
@@ -57,13 +59,15 @@ def find_sharepoint_url(year, month, timeout):
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
-    parser.add_argument("--year", type=int, required=True)
-    parser.add_argument("--month", type=int, required=True)
+    parser.add_argument("--year", "--yyyy", dest="year", type=int, required=True, help="Target year")
+    parser.add_argument("--month", "--mm", dest="month", type=int, required=True, help="Target month (1-12)")
     parser.add_argument("--output-root", type=Path, default=Path("data"))
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--force", action="store_true")
-    parser.add_argument("--debug-html", action="store_true")
-    parser.add_argument("--timeout", type=int, default=30)
+    parser.add_argument("--discover-only", action="store_true", help="Stop after discovery, no download")
+    parser.add_argument("--dry-run", action="store_true", help="Discovery and validation only, no download")
+    parser.add_argument("--force", action="store_true", help="Overwrite existing PDF")
+    parser.add_argument("--use-browser", action="store_true", help="Use Playwright browser rendering")
+    parser.add_argument("--debug-html", action="store_true", help="Save debug HTML on failure")
+    parser.add_argument("--timeout", type=int, default=30, help="HTTP timeout in seconds")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -74,8 +78,8 @@ def main():
 
     session = build_session()
     period = f"{args.year:04d}-{args.month:02d}"
-    output_dir = args.output_root / period / "raw_pdf" / CATEGORY / COMPANY_ID
-    output_pdf = output_dir / f"{COMPANY_ID}_{period}.pdf"
+    output_dir = args.output_root / period / CATEGORY / COMPANY_ID
+    output_pdf = output_dir / f"{COMPANY_ID}_{args.year:04d}_{args.month:02d}.pdf"
 
     LOGGER.info(f"Finding SharePoint download URL for {period}")
     try:
@@ -83,11 +87,12 @@ def main():
     except Exception as e:
         reason = f"browser error: {e}"
         LOGGER.error(reason)
+        output_dir.mkdir(parents=True, exist_ok=True)
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": SOURCE_URL,
             "pdf_url": "", "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "failed", "reason": reason,
+            "output_path": str(output_pdf), "status": "error", "reason": reason,
             "timestamp": current_timestamp()
         }])
         return 1
@@ -95,22 +100,36 @@ def main():
     if not sharepoint_url:
         reason = "no SharePoint link found for target period"
         LOGGER.warning(reason)
+        output_dir.mkdir(parents=True, exist_ok=True)
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
             "pdf_url": "", "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "no_pdf_found", "reason": reason,
+            "output_path": str(output_pdf), "status": "not_found", "reason": reason,
             "timestamp": current_timestamp()
         }])
-        return 0
+        return 1
 
     # Append &download=1 to get direct PDF download from SharePoint
     sep = "&" if "?" in sharepoint_url else "?"
     pdf_url = sharepoint_url + sep + "download=1"
     LOGGER.info(f"Found SharePoint URL, download link: {pdf_url[:80]}...")
 
+    if args.discover_only:
+        LOGGER.info(f"Discovery complete: {pdf_url}")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        write_manifest(output_dir, [{
+            "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
+            "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
+            "pdf_url": pdf_url, "target_year": args.year, "target_month": args.month,
+            "output_path": str(output_pdf), "status": "discover_only", "reason": "discovery-only mode",
+            "timestamp": current_timestamp()
+        }])
+        return 0
+
     if args.dry_run:
         LOGGER.info(f"Dry-run: would download from {pdf_url}")
+        output_dir.mkdir(parents=True, exist_ok=True)
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
@@ -122,11 +141,12 @@ def main():
 
     if output_pdf.exists() and not args.force:
         LOGGER.info(f"PDF already exists at {output_pdf}")
+        output_dir.mkdir(parents=True, exist_ok=True)
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
             "pdf_url": pdf_url, "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "already_exists", "reason": "file exists",
+            "output_path": str(output_pdf), "status": "skipped_existing", "reason": "file exists",
             "timestamp": current_timestamp()
         }])
         return 0
@@ -146,7 +166,7 @@ def main():
             temp_path.unlink()
             raise RuntimeError("Downloaded file is not a valid PDF")
         temp_path.replace(output_pdf)
-        reason = f"HTTP {status}"
+        reason = f"HTTP {status} ({len(data)} bytes)"
         success = True
         LOGGER.info(f"Successfully downloaded to {output_pdf} ({len(data)} bytes)")
     except Exception as e:
@@ -158,7 +178,7 @@ def main():
         "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
         "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
         "pdf_url": pdf_url, "target_year": args.year, "target_month": args.month,
-        "output_path": str(output_pdf), "status": "success" if success else "failed",
+        "output_path": str(output_pdf), "status": "downloaded" if success else "error",
         "reason": reason, "timestamp": current_timestamp()
     }])
     return 0 if success else 1
