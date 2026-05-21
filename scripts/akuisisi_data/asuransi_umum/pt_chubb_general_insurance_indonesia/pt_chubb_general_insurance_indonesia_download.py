@@ -13,6 +13,7 @@ from _downloader_base import (
 
 LOGGER = logging.getLogger("download_pt_chubb_general_insurance_indonesia")
 SOURCE_URL = "https://www.chubb.com/id-id/about-chubb/laporan-keuangan-chubb-indonesia.html"
+FALLBACK_URL = SOURCE_URL
 COMPANY_ID = "pt_chubb_general_insurance_indonesia"
 COMPANY_NAME = "PT Chubb General Insurance Indonesia"
 CATEGORY = "asuransi_umum"
@@ -78,7 +79,17 @@ def main():
         return 1
     
     candidates = discover_chubb_reports(html, discovered_url, args.year, args.month, args.timeout)
-    
+
+    if not candidates and SOURCE_URL != FALLBACK_URL:
+        LOGGER.info(f"No candidates from primary URL, trying fallback: {FALLBACK_URL}")
+        try:
+            html, discovered_url, used_browser = fetch_html_with_smart_fallback(
+                session, FALLBACK_URL, args.year, args.month, args.timeout
+            )
+            candidates = discover_chubb_reports(html, discovered_url, args.year, args.month, args.timeout)
+        except Exception as e:
+            LOGGER.debug(f"Fallback fetch failed: {e}")
+
     if not candidates:
         reason = "no PDF candidates found"
         LOGGER.warning(reason)

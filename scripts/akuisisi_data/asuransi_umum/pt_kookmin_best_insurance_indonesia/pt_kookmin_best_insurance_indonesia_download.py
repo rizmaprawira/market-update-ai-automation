@@ -18,6 +18,7 @@ from _downloader_base import (
 LOGGER = logging.getLogger("download_pt_kookmin_best_insurance_indonesia")
 SOURCE_BASE = "https://www.kbfg.com"
 SOURCE_URL = "https://www.kbfg.com/idn/ir/report/financial/list.jsp"
+FALLBACK_URL = "https://kbinsure.co.id/insurance/about_us/financial_statement"
 COMPANY_ID = "pt_kookmin_best_insurance_indonesia"
 COMPANY_NAME = "PT Kookmin Best Insurance Indonesia"
 CATEGORY = "asuransi_umum"

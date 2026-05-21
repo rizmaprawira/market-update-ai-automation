@@ -14,6 +14,7 @@ from _downloader_base import (
 
 LOGGER = logging.getLogger("download_pt_asuransi_umum_videi")
 SOURCE_URL = "https://videiinsurance.com/laporan-keuangan"
+FALLBACK_URL = "https://www.videi-insurance.co.id/laporan-keuangan/"
 COMPANY_ID = "pt_asuransi_umum_videi"
 COMPANY_NAME = "PT Asuransi Umum Videi"
 CATEGORY = "asuransi_umum"
@@ -43,8 +44,11 @@ def main():
     output_pdf = output_dir / f"{COMPANY_ID}_{args.year:04d}_{args.month:02d}.pdf"
     debug_dir = output_dir / "_debug_html"
 
-    LOGGER.info(f"Fetching from {SOURCE_URL}")
+    html = None
+    discovered_url = SOURCE_URL
+    fetch_error = None
 
+    LOGGER.info(f"Fetching from {SOURCE_URL}")
     try:
         if args.use_browser:
             LOGGER.info("Using Playwright browser rendering")
@@ -54,18 +58,34 @@ def main():
                 session, SOURCE_URL, args.year, args.month, args.timeout
             )
     except Exception as e:
-        reason = f"failed to fetch: {e}"
-        LOGGER.error(reason)
-        if args.debug_html:
-            write_debug_html(debug_dir, "", reason)
-        write_manifest(output_dir, [{
-            "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
-            "source_page_url": SOURCE_URL, "discovered_page_url": SOURCE_URL,
-            "pdf_url": "", "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "error", "reason": reason,
-            "timestamp": current_timestamp()
-        }])
-        return 1
+        fetch_error = str(e)
+        LOGGER.warning(f"Primary URL failed: {fetch_error}")
+        if SOURCE_URL != FALLBACK_URL:
+            LOGGER.info(f"Trying fallback URL: {FALLBACK_URL}")
+            try:
+                if args.use_browser:
+                    html, discovered_url = fetch_html_browser(FALLBACK_URL, args.timeout)
+                else:
+                    html, discovered_url, used_browser = fetch_html_with_smart_fallback(
+                        session, FALLBACK_URL, args.year, args.month, args.timeout
+                    )
+                fetch_error = None
+            except Exception as e2:
+                fetch_error = str(e2)
+                LOGGER.error(f"Fallback URL also failed: {fetch_error}")
+
+        if fetch_error:
+            reason = f"failed to fetch: {fetch_error}"
+            if args.debug_html:
+                write_debug_html(debug_dir, "", reason)
+            write_manifest(output_dir, [{
+                "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
+                "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
+                "pdf_url": "", "target_year": args.year, "target_month": args.month,
+                "output_path": str(output_pdf), "status": "error", "reason": reason,
+                "timestamp": current_timestamp()
+            }])
+            return 1
 
     candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
 

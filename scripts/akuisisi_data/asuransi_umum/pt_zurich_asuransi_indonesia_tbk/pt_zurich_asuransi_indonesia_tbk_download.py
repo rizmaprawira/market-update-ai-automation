@@ -9,11 +9,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from _downloader_base import (
     build_session, extract_pdf_links, download_pdf, write_manifest, write_debug_html,
-    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp
+    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp,
+    MONTH_LABELS
 )
+
+def discover_zurich_reports(html, base_url, year, month, timeout=30):
+    """Site-specific discovery: prioritize exact month match."""
+    candidates = extract_pdf_links(html, base_url, year, month)
+    if not candidates:
+        return []
+    target_month = MONTH_LABELS[month].lower()
+    exact = [c for c in candidates if target_month in c.text.lower() and str(year) in c.text]
+    return exact if exact else candidates
 
 LOGGER = logging.getLogger("download_pt_zurich_asuransi_indonesia_tbk")
 SOURCE_URL = "https://www.zurich.co.id/tentang-kami/zurich-asuransi-indonesia/informasi-investor"
+FALLBACK_URL = SOURCE_URL
 COMPANY_ID = "pt_zurich_asuransi_indonesia_tbk"
 COMPANY_NAME = "PT Zurich Asuransi Indonesia Tbk."
 CATEGORY = "asuransi_umum"
@@ -68,8 +79,18 @@ def main():
         }])
         return 1
     
-    candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
-    
+    candidates = discover_zurich_reports(html, discovered_url, args.year, args.month, args.timeout)
+
+    if not candidates and SOURCE_URL != FALLBACK_URL:
+        LOGGER.info(f"No candidates from primary URL, trying fallback: {FALLBACK_URL}")
+        try:
+            html, discovered_url, used_browser = fetch_html_with_smart_fallback(
+                session, FALLBACK_URL, args.year, args.month, args.timeout
+            )
+            candidates = discover_zurich_reports(html, discovered_url, args.year, args.month, args.timeout)
+        except Exception as e:
+            LOGGER.debug(f"Fallback fetch failed: {e}")
+
     if not candidates:
         reason = "no PDF candidates found"
         LOGGER.warning(reason)

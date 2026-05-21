@@ -5,6 +5,7 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _downloader_base import (
     build_session, extract_pdf_links, download_pdf, write_manifest, write_debug_html,
     fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp
@@ -19,9 +20,12 @@ CATEGORY = "asuransi_jiwa"
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
     parser.add_argument("--year", type=int, required=True, help="Target year")
-    parser.add_argument("--month", type=int, required=True, help="Target month (1-12)")
+    parser.add_argument("--yyyy", dest="year", type=int, help="Target year (alias for --year)")
+    parser.add_argument("--month", type=int, required=True, help="Target month (1-12)
+    parser.add_argument("--mm", dest="month", type=int, help="Target month 1-12 (alias for --month)")")
     parser.add_argument("--output-root", type=Path, default=Path("data"))
     parser.add_argument("--dry-run", action="store_true", help="Discovery only, no download")
+    parser.add_argument("--discover-only", action="store_true", help="Stop after discovery, return 0")
     parser.add_argument("--force", action="store_true", help="Overwrite existing PDF")
     parser.add_argument("--use-browser", action="store_true", help="Use Playwright browser rendering")
     parser.add_argument("--debug-html", action="store_true", help="Save debug HTML on failure")
@@ -36,8 +40,8 @@ def main():
     
     session = build_session()
     period = f"{args.year:04d}-{args.month:02d}"
-    output_dir = args.output_root / period / "raw_pdf" / CATEGORY / COMPANY_ID
-    output_pdf = output_dir / f"{COMPANY_ID}_{period}.pdf"
+    output_dir = args.output_root / period / CATEGORY / COMPANY_ID
+    output_pdf = output_dir / f"{COMPANY_ID}_{args.year:04d}_{args.month:02d}.pdf"
     debug_dir = output_dir / "_debug_html"
     
     LOGGER.info(f"Fetching from {SOURCE_URL}")
