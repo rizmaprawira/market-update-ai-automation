@@ -13,7 +13,7 @@ from _downloader_base import (
 )
 
 LOGGER = logging.getLogger("download_pt_asuransi_total_bersama")
-SOURCE_URL = "https://www.tob-ins.com/TentangKami/LaporanPerusahaan"
+SOURCE_URL = "https://www.tob-ins.com/id/tentang-kami/laporan-perusahaan"
 COMPANY_ID = "pt_asuransi_total_bersama"
 COMPANY_NAME = "PT Asuransi Total Bersama"
 CATEGORY = "asuransi_umum"
