@@ -4,6 +4,8 @@ import logging
 import sys
 import time
 from pathlib import Path
+import requests
+from urllib3.exceptions import InsecureRequestWarning
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -12,8 +14,11 @@ from _downloader_base import (
     fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp, discover_download_candidate, PDFCandidate
 )
 
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+
 LOGGER = logging.getLogger("download_pt_asuransi_kredit_indonesia")
 SOURCE_URL = "https://askrindo.co.id/laporan-keuangan-berjalan"
+FALLBACK_URL = SOURCE_URL
 COMPANY_ID = "pt_asuransi_kredit_indonesia"
 COMPANY_NAME = "PT Asuransi Kredit Indonesia"
 CATEGORY = "asuransi_umum"
@@ -38,12 +43,13 @@ def main():
         return 1
     
     session = build_session()
+    session.verify = False  # Disable SSL verification for Askrindo certificate issue
     period = f"{args.year:04d}-{args.month:02d}"
     output_dir = args.output_root / period / CATEGORY / COMPANY_ID
     output_pdf = output_dir / f"{COMPANY_ID}_{args.year:04d}_{args.month:02d}.pdf"
     debug_dir = output_dir / "_debug_html"
-    
-    LOGGER.info(f"Fetching from {SOURCE_URL}")
+
+    LOGGER.info(f"Fetching from {SOURCE_URL} (SSL verification disabled due to cert issue)")
     
     try:
         if args.use_browser:
@@ -107,9 +113,17 @@ def main():
             "timestamp": current_timestamp()
         }])
         return 0
-    
+
+    # Askrindo may serve JPG or PDF files - adjust output extension accordingly
+    file_ext = ".pdf" if selected_candidate.url.lower().endswith('.pdf') else ".jpg"
+    if file_ext == ".jpg":
+        output_file = output_dir / f"{COMPANY_ID}_{args.year:04d}_{args.month:02d}.jpg"
+        LOGGER.info(f"Document format: JPG (will save as {file_ext})")
+    else:
+        output_file = output_pdf
+
     http_status, file_size = download_pdf(
-        session, selected_candidate.url, output_pdf, timeout=args.timeout, force=args.force
+        session, selected_candidate.url, output_file, timeout=args.timeout, force=args.force
     )
     success = True
     reason = (
@@ -122,7 +136,7 @@ def main():
         "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
         "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
         "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
-        "output_path": str(output_pdf), "status": "downloaded" if http_status is not None else "skipped_existing",
+        "output_path": str(output_file), "status": "downloaded" if http_status is not None else "skipped_existing",
         "reason": reason, "timestamp": current_timestamp()
     }])
     

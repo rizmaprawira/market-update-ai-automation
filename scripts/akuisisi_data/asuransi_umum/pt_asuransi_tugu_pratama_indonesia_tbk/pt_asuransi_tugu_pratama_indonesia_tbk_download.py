@@ -14,6 +14,7 @@ from _downloader_base import (
 
 LOGGER = logging.getLogger("download_pt_asuransi_tugu_pratama_indonesia_tbk")
 SOURCE_URL = "https://tuguindonesia.com/perusahaan/laporan-keuangan"
+FALLBACK_URL = SOURCE_URL
 COMPANY_ID = "pt_asuransi_tugu_pratama_indonesia_tbk"
 COMPANY_NAME = "PT Asuransi Tugu Pratama Indonesia Tbk"
 CATEGORY = "asuransi_umum"
@@ -44,15 +45,10 @@ def main():
     debug_dir = output_dir / "_debug_html"
 
     LOGGER.info(f"Fetching from {SOURCE_URL}")
+    LOGGER.info("Using Playwright browser rendering (required for Tugu Pratama)")
 
     try:
-        if args.use_browser:
-            LOGGER.info("Using Playwright browser rendering")
-            html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
-        else:
-            html, discovered_url, used_browser = fetch_html_with_smart_fallback(
-                session, SOURCE_URL, args.year, args.month, args.timeout
-            )
+        html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
     except Exception as e:
         reason = f"failed to fetch: {e}"
         LOGGER.error(reason)
