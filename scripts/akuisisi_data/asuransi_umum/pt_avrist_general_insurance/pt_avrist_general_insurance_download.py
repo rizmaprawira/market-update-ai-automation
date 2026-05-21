@@ -13,7 +13,7 @@ from _downloader_base import (
 )
 
 LOGGER = logging.getLogger("download_pt_avrist_general_insurance")
-SOURCE_URL = "https://avristgeneral.com/tentang-kami/avrist-general-insurance?tab=Laporan+Perusahaan"
+SOURCE_URL = "https://www.avrist.com/laporan-keuangan"
 COMPANY_ID = "pt_avrist_general_insurance"
 COMPANY_NAME = "PT Avrist General Insurance"
 CATEGORY = "asuransi_umum"
@@ -23,27 +23,28 @@ def main():
     parser.add_argument("--year", "--yyyy", dest="year", type=int, required=True, help="Target year")
     parser.add_argument("--month", "--mm", dest="month", type=int, required=True, help="Target month (1-12)")
     parser.add_argument("--output-root", type=Path, default=Path("data"))
-    parser.add_argument("--dry-run", action="store_true", help="Discovery only, no download")
+    parser.add_argument("--discover-only", action="store_true", help="Stop after discovery, no download")
+    parser.add_argument("--dry-run", action="store_true", help="Validate download without writing")
     parser.add_argument("--force", action="store_true", help="Overwrite existing PDF")
     parser.add_argument("--use-browser", action="store_true", help="Use Playwright browser rendering")
     parser.add_argument("--debug-html", action="store_true", help="Save debug HTML on failure")
     parser.add_argument("--timeout", type=int, default=30, help="HTTP timeout in seconds")
     args = parser.parse_args()
-    
+
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
-    
+
     if not 1 <= args.month <= 12:
         LOGGER.error("Month must be 1-12")
         return 1
-    
+
     session = build_session()
     period = f"{args.year:04d}-{args.month:02d}"
-    output_dir = args.output_root / period / "raw_pdf" / CATEGORY / COMPANY_ID
-    output_pdf = output_dir / f"{COMPANY_ID}_{period}.pdf"
+    output_dir = args.output_root / period / CATEGORY / COMPANY_ID
+    output_pdf = output_dir / f"{COMPANY_ID}_{args.year:04d}_{args.month:02d}.pdf"
     debug_dir = output_dir / "_debug_html"
-    
+
     LOGGER.info(f"Fetching from {SOURCE_URL}")
-    
+
     try:
         if args.use_browser:
             LOGGER.info("Using Playwright browser rendering")
@@ -61,13 +62,13 @@ def main():
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": SOURCE_URL,
             "pdf_url": "", "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "failed", "reason": reason,
+            "output_path": str(output_pdf), "status": "error", "reason": reason,
             "timestamp": current_timestamp()
         }])
         return 1
-    
+
     candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
-    
+
     if not candidates:
         reason = "no PDF candidates found"
         LOGGER.warning(reason)
@@ -77,14 +78,25 @@ def main():
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
             "pdf_url": "", "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "no_pdf_found", "reason": reason,
+            "output_path": str(output_pdf), "status": "not_found", "reason": reason,
+            "timestamp": current_timestamp()
+        }])
+        return 1
+
+    selected_candidate = candidates[0]
+    LOGGER.info(f"Selected: {selected_candidate.text[:60]}")
+
+    if args.discover_only:
+        LOGGER.info("Discovery complete (--discover-only mode)")
+        write_manifest(output_dir, [{
+            "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
+            "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
+            "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+            "output_path": str(output_pdf), "status": "discover_only", "reason": "discovery complete",
             "timestamp": current_timestamp()
         }])
         return 0
-    
-    selected_candidate = candidates[0]
-    LOGGER.info(f"Selected: {selected_candidate.text[:60]}")
-    
+
     if args.dry_run:
         LOGGER.info(f"Dry-run: would download from {selected_candidate.url}")
         write_manifest(output_dir, [{
@@ -95,36 +107,43 @@ def main():
             "timestamp": current_timestamp()
         }])
         return 0
-    
+
     if output_pdf.exists() and not args.force:
         LOGGER.info(f"PDF already exists at {output_pdf}")
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
             "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "already_exists", "reason": "file exists",
+            "output_path": str(output_pdf), "status": "skipped_existing", "reason": "file exists",
             "timestamp": current_timestamp()
         }])
         return 0
-    
-    success, reason = download_pdf(
-        session, selected_candidate.url, output_pdf, timeout=args.timeout
+
+    http_status, file_size = download_pdf(
+        session, selected_candidate.url, output_pdf, timeout=args.timeout, force=args.force
     )
-    
+
+    status = "downloaded" if http_status is not None else "skipped_existing"
+    reason = (
+        f"HTTP {http_status} ({file_size} bytes)"
+        if http_status is not None
+        else f"existing valid ({file_size} bytes)"
+    )
+
     write_manifest(output_dir, [{
         "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
         "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
         "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
-        "output_path": str(output_pdf), "status": "success" if success else "failed",
-        "reason": reason, "timestamp": current_timestamp()
+        "output_path": str(output_pdf), "status": status, "reason": reason,
+        "timestamp": current_timestamp()
     }])
-    
-    if success:
-        LOGGER.info(f"Successfully downloaded to {output_pdf}")
+
+    if http_status is not None:
+        LOGGER.info(f"Successfully downloaded to {output_pdf} ({file_size} bytes)")
     else:
-        LOGGER.error(f"Failed to download: {reason}")
-    
-    return 0 if success else 1
+        LOGGER.info(f"Using existing valid PDF at {output_pdf}")
+
+    return 0
 
 if __name__ == "__main__":
     sys.exit(main())
