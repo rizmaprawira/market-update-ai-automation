@@ -21,23 +21,38 @@ CATEGORY = "asuransi_umum"
 
 def discover_bri_reports(html, base_url, year, month, timeout=30):
     """
-    BRI serves reports via broadcast.api.brinesia.app with dynamic gallery IDs.
-    Pattern: /FinancialReportGallery/{GALLERY_ID}/LaporanKeuanganPublikasi{Month}{Year}Konvensional.pdf
+    BRI serves reports via broadcast.api.brinesia.app with dynamic gallery IDs per month.
+    Gallery IDs are loaded dynamically by the Angular app.
+    Known working gallery IDs:
+      - March 2026: F5D59F0029C3F1CC1429EF6FF98B5C371EA3855142E47661C52EA26858BA46A9
+      - April 2026: 3E95B044B4BFC897EEFD9586C83FC409CAB6E3DD6101B90DFEAEFBDD8835861F
     """
     import re
+    from _downloader_base import build_session as _build_session, PDFCandidate
 
     candidates = []
 
-    # Try to extract gallery ID from page (may be in JavaScript or data attributes)
-    gallery_matches = re.findall(r'[A-F0-9]{64}', html)
+    # Known gallery IDs for 2026 (these should be updated as new months are published)
+    gallery_ids_2026 = {
+        1: "",  # January - check when available
+        2: "",  # February
+        3: "F5D59F0029C3F1CC1429EF6FF98B5C371EA3855142E47661C52EA26858BA46A9",  # March
+        4: "3E95B044B4BFC897EEFD9586C83FC409CAB6E3DD6101B90DFEAEFBDD8835861F",  # April
+        5: "",  # May
+    }
 
-    if not gallery_matches:
-        # Fallback: use a known gallery ID if available (would need to be updated periodically)
-        # For now, we note that BRI's API requires discovery of gallery ID from the live page
-        LOGGER.debug("Could not extract gallery ID from page")
-        return []
-
-    gallery_id = gallery_matches[0]  # Use first match
+    if year == 2026 and month in gallery_ids_2026:
+        gallery_id = gallery_ids_2026[month]
+        if not gallery_id:
+            LOGGER.debug(f"Gallery ID for {year}-{month:02d} not yet known")
+            return []
+    else:
+        # Try to extract gallery ID from HTML (if rendered with data)
+        gallery_matches = re.findall(r'[A-F0-9]{64}', html)
+        if not gallery_matches:
+            LOGGER.debug(f"Could not find gallery ID for {year}-{month:02d}")
+            return []
+        gallery_id = gallery_matches[0]
 
     # Build URL with Indonesian month name
     month_names = {
@@ -53,17 +68,17 @@ def discover_bri_reports(html, base_url, year, month, timeout=30):
 
     # Verify URL exists
     try:
-        from _downloader_base import build_session as _build_session
         session = _build_session()
         r = session.head(pdf_url, timeout=timeout, allow_redirects=True)
         if r.status_code == 200:
-            from _downloader_base import PDFCandidate
             candidates.append(PDFCandidate(
                 url=pdf_url,
                 text=f"BRI Report {month_name} {year}",
                 score=100,
                 discovered_url=base_url
             ))
+        else:
+            LOGGER.debug(f"BRI URL returned {r.status_code}")
     except Exception as e:
         LOGGER.debug(f"BRI URL verification failed: {e}")
 
