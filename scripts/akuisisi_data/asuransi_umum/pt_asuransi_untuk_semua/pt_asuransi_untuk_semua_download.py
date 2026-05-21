@@ -13,7 +13,7 @@ from _downloader_base import (
 )
 
 LOGGER = logging.getLogger("download_pt_asuransi_untuk_semua")
-SOURCE_URL = "https://asuransiuntuksemua.co.id/laporan-keuangan"
+SOURCE_URL = "https://tap-insure.com/laporan-keuangan"
 COMPANY_ID = "pt_asuransi_untuk_semua"
 COMPANY_NAME = "PT Asuransi Untuk Semua"
 CATEGORY = "asuransi_umum"

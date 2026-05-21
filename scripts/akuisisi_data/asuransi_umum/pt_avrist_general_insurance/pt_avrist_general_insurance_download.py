@@ -13,7 +13,7 @@ from _downloader_base import (
 )
 
 LOGGER = logging.getLogger("download_pt_avrist_general_insurance")
-SOURCE_URL = "https://www.avrist.com/laporan-keuangan"
+SOURCE_URL = "https://www.avrist.com/tentang-avrist-life/tentang-avrist-life?tab=Laporan+Perusahaan"
 COMPANY_ID = "pt_avrist_general_insurance"
 COMPANY_NAME = "PT Avrist General Insurance"
 CATEGORY = "asuransi_umum"

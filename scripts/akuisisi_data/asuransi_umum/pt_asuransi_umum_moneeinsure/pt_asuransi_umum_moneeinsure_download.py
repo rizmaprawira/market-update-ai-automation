@@ -1,4 +1,4 @@
-"""Download financial reports for PT Asuransi Umum Seainsure."""
+"""Download financial reports for PT Asuransi Umum Moneeinsure."""
 import argparse
 import logging
 import sys
@@ -12,10 +12,10 @@ from _downloader_base import (
     fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp
 )
 
-LOGGER = logging.getLogger("download_pt_asuransi_umum_seainsure")
-SOURCE_URL = "https://www.seainsure.co.id/laporan-keuangan"
-COMPANY_ID = "pt_asuransi_umum_seainsure"
-COMPANY_NAME = "PT Asuransi Umum Seainsure"
+LOGGER = logging.getLogger("download_pt_asuransi_umum_moneeinsure")
+SOURCE_URL = "https://moneeinsure.co.id/about-us/life/statement"
+COMPANY_ID = "pt_asuransi_umum_moneeinsure"
+COMPANY_NAME = "PT Asuransi Umum Moneeinsure"
 CATEGORY = "asuransi_umum"
 
 def main():
