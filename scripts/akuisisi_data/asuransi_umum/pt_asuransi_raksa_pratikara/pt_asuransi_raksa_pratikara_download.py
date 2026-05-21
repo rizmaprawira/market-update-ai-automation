@@ -9,13 +9,43 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from _downloader_base import (
     build_session, extract_pdf_links, download_pdf, write_manifest, write_debug_html,
-    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp, discover_download_candidate, PDFCandidate
+    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp, discover_download_candidate, PDFCandidate,
+    MONTH_LABELS
 )
+from playwright.sync_api import sync_playwright
 
 LOGGER = logging.getLogger("download_pt_asuransi_raksa_pratikara")
 SOURCE_URL = "https://www.raksaonline.com/laporan-keuangan/"
 FALLBACK_URL = SOURCE_URL
 COMPANY_ID = "pt_asuransi_raksa_pratikara"
+
+def find_raksa_pdf_with_dropdown(year, month, timeout=30):
+    """Use Playwright to interact with Raksa dropdowns and find PDF."""
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            page = browser.new_page()
+            page.goto(SOURCE_URL, wait_until="networkidle", timeout=timeout*1000)
+
+            # Wait for and select year dropdown
+            year_select = page.locator("select[name*='year'], select[name*='tahun'], #year, #tahun")
+            if year_select.count() > 0:
+                year_select.first.select_option(str(year))
+                page.wait_for_timeout(500)
+
+            # Wait for and select month dropdown
+            month_select = page.locator("select[name*='month'], select[name*='bulan'], #month, #bulan")
+            if month_select.count() > 0:
+                month_select.first.select_option(str(month).zfill(2))
+                page.wait_for_timeout(1000)
+
+            # Extract HTML after selections
+            html = page.content()
+            browser.close()
+            return html, SOURCE_URL
+    except Exception as e:
+        LOGGER.debug(f"Dropdown interaction failed: {e}")
+        return None, SOURCE_URL
 COMPANY_NAME = "PT Asuransi Raksa Pratikara"
 CATEGORY = "asuransi_umum"
 
@@ -45,10 +75,12 @@ def main():
     debug_dir = output_dir / "_debug_html"
     
     LOGGER.info(f"Fetching from {SOURCE_URL}")
-    LOGGER.info("Using Playwright browser rendering (required for Raksa)")
+    LOGGER.info("Using Playwright with dropdown interaction (required for Raksa)")
 
     try:
-        html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
+        html, discovered_url = find_raksa_pdf_with_dropdown(args.year, args.month, args.timeout)
+        if not html:
+            raise Exception("Dropdown interaction returned no content")
     except Exception as e:
         reason = f"failed to fetch: {e}"
         LOGGER.error(reason)

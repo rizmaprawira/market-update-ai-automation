@@ -9,13 +9,37 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from _downloader_base import (
     build_session, extract_pdf_links, download_pdf, write_manifest, write_debug_html,
-    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp
+    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp, MONTH_LABELS
 )
+from playwright.sync_api import sync_playwright
 
 LOGGER = logging.getLogger("download_pt_asuransi_simas_insurtech")
 SOURCE_URL = "https://simasinsurtech.com/tentang-kami"
 FALLBACK_URL = "https://simasinsurtech.com/tentang-kami/laporan-keuangan-simasinsurtech/"
 COMPANY_ID = "pt_asuransi_simas_insurtech"
+
+def find_simas_pdf_with_dropdown(year, month, timeout=30):
+    """Use Playwright to interact with Simas dropdowns and find PDF."""
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            page = browser.new_page()
+            page.goto(SOURCE_URL, wait_until="networkidle", timeout=timeout*1000)
+
+            # Simas needs year and month clicks/dropdowns
+            selects = page.locator("select")
+            if selects.count() >= 2:
+                selects.nth(0).select_option(str(year))
+                page.wait_for_timeout(500)
+                selects.nth(1).select_option(str(month).zfill(2))
+                page.wait_for_timeout(1000)
+
+            html = page.content()
+            browser.close()
+            return html, SOURCE_URL
+    except Exception as e:
+        LOGGER.debug(f"Simas dropdown interaction failed: {e}")
+        return None, SOURCE_URL
 COMPANY_NAME = "PT Asuransi Simas Insurtech"
 CATEGORY = "asuransi_umum"
 
@@ -49,9 +73,12 @@ def main():
     fetch_error = None
 
     LOGGER.info(f"Fetching from {SOURCE_URL}")
-    LOGGER.info("Using Playwright browser rendering (required for Simas)")
+    LOGGER.info("Using Playwright with dropdown interaction (required for Simas)")
     try:
-        html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
+        html, discovered_url = find_simas_pdf_with_dropdown(args.year, args.month, args.timeout)
+        if not html:
+            raise Exception("Dropdown interaction returned no content")
+        # html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
     except Exception as e:
         fetch_error = str(e)
         LOGGER.warning(f"Primary URL failed: {fetch_error}")

@@ -13,7 +13,7 @@ from _downloader_base import (
 )
 
 LOGGER = logging.getLogger("download_pt_asuransi_tugu_pratama_indonesia_tbk")
-SOURCE_URL = "https://tuguindonesia.com/perusahaan/laporan-keuangan"
+SOURCE_URL = "https://www.tugu.com/investor-relations/laporan-keuangan"
 FALLBACK_URL = SOURCE_URL
 COMPANY_ID = "pt_asuransi_tugu_pratama_indonesia_tbk"
 COMPANY_NAME = "PT Asuransi Tugu Pratama Indonesia Tbk"
