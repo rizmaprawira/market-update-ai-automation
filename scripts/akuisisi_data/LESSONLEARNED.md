@@ -111,6 +111,47 @@ class OrionExtractor(ResuransiExtractor):
         return {'aset': 'X Jumlah Aset...', ...}
 ```
 
+#### 7. Upsert vs Append Mode ✅
+Old approach: append-only → duplicate rows on re-run same period
+```python
+# ❌ OLD: Creates duplicates
+with DATABASE_CSV.open("a") as f:  # append mode
+    writer.writerows(rows)
+```
+
+New approach: upsert with filtering
+```python
+# ✅ NEW: Prevents duplicates via helper function
+upsert_database_csv(DATABASE_CSV, new_rows, COLUMNS)
+```
+- Filter existing rows by `(periode, nama_perusahaan)` tuple
+- Keep non-matching rows + append new ones
+- Ensures idempotency: running script multiple times for same period = same database state
+
+#### 8. Company-Specific Keywords Are Essential ⚠️
+Each company's laporan keuangan has different:
+- Row numbers: `"34 Jumlah Aset (20 + 33)"` vs `"35 Jumlah Aset (21+34)"`
+- Label capitalization: `"HASIL UNDERWRITING"` vs `"Hasil Underwriting"`
+- Suffix variations: `"Rasio Likuiditas (%)"` with `"a."` vs `"b."` prefix
+- Value format: Some use `%` in values (`"434.39%"`), some don't (`"161.28"`)
+- OCR artifacts: Maipark has scanner-induced noise (`"<_"`, `"~_"`, `""``)
+
+**Pattern:** Each script hard-codes its own keywords to match exact company format.
+Pre-verified all keywords from actual 2026-04 TXT files.
+
+#### 9. OCR-Lenient Extraction for Low-Quality Scans ✅
+Maipark PDF adalah scan, OCR output punya artifacts antara keyword dan nilai.
+```python
+def extract_two_numbers_ocr(text: str, keyword: str):
+    pattern = re.compile(
+        rf"{re.escape(keyword)}[^0-9(]{{0,30}}(\(?[0-9\.,%-]+\)?)[^0-9)(]{{0,15}}(\(?[0-9\.,%-]+\)?)",
+        re.IGNORECASE,
+    )
+```
+- `[^0-9(]{0,30}` allows up to 30 non-numeric chars between keyword and first value
+- Handles: `"Premi Bruto <_ 66,661"`, `"Laba ~_ 17,503"`, etc.
+- Standard regex falls back to None for unparseable OCR text (expected for low-quality scans)
+
 ---
 
 ## Major Bugs Found & Fixed
@@ -254,8 +295,9 @@ data/2026-03/
 - `data/YYYY-MM/reasuransi/pt_company_name/pt_company_name_YYYY_MM.txt` — Extracted text
 - `data/YYYY-MM/reasuransi/pt_company_name/pt_company_name_YYYY_MM_ocr.pdf` — OCR'd PDF (Maipark only)
 
-#### Phase 3 (Metrics Extraction) — Soon
-- `data/YYYY-MM/reasuransi/pt_company_name/pt_company_name_key_metric_YYYY_MM.csv` — Extracted metrics
+#### Phase 3 (Metrics Extraction) ✅
+- `data/YYYY-MM/reasuransi/pt_company_name/pt_company_name_key_metric_YYYY_MM.csv` — Per-company extracted metrics
+- Database upsert: existing `(periode, company)` rows are replaced, not duplicated
 
 #### Summary & Logs
 - `data/YYYY-MM/akuisisi_log.txt` — Complete execution log
@@ -301,25 +343,40 @@ apt-get install tesseract-ocr  # Linux
 
 ---
 
+## Completed Milestones
+
+### ✅ Phase 3: Metrics Extraction (Complete)
+- 8 key_metric extraction scripts created (one per reinsurance company)
+- Upsert logic implemented to prevent duplicate rows on re-run
+- Company-specific keywords verified from real 2026-04 data
+- OCR-lenient extraction for Maipark (low-quality scans)
+- Database aggregation working with `|` delimiter and upsert semantics
+
 ## Recommended Next Steps
 
-### Phase 1: Metrics Extraction Scaling
-1. Identify keyword differences across 2-3 additional companies
-2. Refactor to template class pattern (see pattern above)
-3. Add company-specific subclasses for keyword overrides
-4. Build unified orchestrator CLI for `--all` batch mode
+### Phase 3+: Integration & Scaling
+1. **Integrate Phase 3 into orchestrator shell script**
+   - Add `--skip-key-metric` flag to bypass extraction
+   - Include Phase 3 in progress reporting & summary
+   - Validate database CSV output completeness
 
-### Phase 2: Output Validation
-1. Post-download: validate ukuran minimum + PDF signature `%PDF-`
-2. Post-conversion: validate semua company punya TXT output
-3. Post-extraction: validate data completeness (no null metrics)
+2. **Output Validation**
+   - Post-download: validate ukuran minimum + PDF signature `%PDF-`
+   - Post-conversion: validate semua company punya TXT output
+   - Post-extraction: validate no orphaned metrics (all companies represented)
+   - Database integrity: check row count = 2 × (n companies)
 
-### Phase 3: Regression Testing
-1. Fixture HTML tests untuk:
-   - Tugu month selection
-   - Nusantara AJAX parsing
-   - Status mapping consistency
-2. Data integrity checks per period
+3. **Future Scaling: Refactor to Template Pattern**
+   - If adding many more companies or metrics, migrate to class-based extractors
+   - Company-specific subclasses for keyword overrides
+   - Would reduce code duplication
+
+4. **Regression Testing**
+   - Fixture HTML tests untuk:
+     - Tugu month selection
+     - Nusantara AJAX parsing
+     - Status mapping consistency
+   - Data integrity checks per period
 
 ---
 
@@ -332,23 +389,31 @@ scripts/
 │   ├── akuisisi_data_reasuransi.sh   (orchestrator)
 │   ├── download_reasuransi.py        (Python meta-orchestrator)
 │   └── reasuransi/
+│       ├── _key_metric_helpers.py         (shared upsert logic)
 │       ├── pt_indoperkasa_suksesjaya_reasuransi/
-│       │   └── pt_indoperkasa_suksesjaya_reasuransi_download.py
+│       │   ├── pt_indoperkasa_suksesjaya_reasuransi_download.py
+│       │   └── pt_indoperkasa_suksesjaya_reasuransi_key_metric.py
 │       ├── pt_maskapai_reasuransi_indonesia/
 │       │   ├── pt_maskapai_reasuransi_indonesia_download.py
 │       │   └── pt_maskapai_reasuransi_indonesia_key_metric.py
 │       ├── pt_orion_reasuransi_indonesia/
-│       │   └── pt_orion_reasuransi_indonesia_download.py
+│       │   ├── pt_orion_reasuransi_indonesia_download.py
+│       │   └── pt_orion_reasuransi_indonesia_key_metric.py
 │       ├── pt_reasuransi_indonesia_utama/
-│       │   └── pt_reasuransi_indonesia_utama_download.py
+│       │   ├── pt_reasuransi_indonesia_utama_download.py
+│       │   └── pt_reasuransi_indonesia_utama_key_metric.py
 │       ├── pt_reasuransi_maipark_indonesia/
-│       │   └── pt_reasuransi_maipark_indonesia_download.py
+│       │   ├── pt_reasuransi_maipark_indonesia_download.py
+│       │   └── pt_reasuransi_maipark_indonesia_key_metric.py
 │       ├── pt_reasuransi_nasional_indonesia/
-│       │   └── pt_reasuransi_nasional_indonesia_download.py
+│       │   ├── pt_reasuransi_nasional_indonesia_download.py
+│       │   └── pt_reasuransi_nasional_indonesia_key_metric.py
 │       ├── pt_reasuransi_nusantara_makmur/
-│       │   └── pt_reasuransi_nusantara_makmur_download.py
+│       │   ├── pt_reasuransi_nusantara_makmur_download.py
+│       │   └── pt_reasuransi_nusantara_makmur_key_metric.py
 │       └── pt_tugu_reasuransi_indonesia/
-│           └── pt_tugu_reasuransi_indonesia_download.py
+│           ├── pt_tugu_reasuransi_indonesia_download.py
+│           └── pt_tugu_reasuransi_indonesia_key_metric.py
 ├── utils/
 │   ├── cleanup.sh
 │   ├── setup.sh
