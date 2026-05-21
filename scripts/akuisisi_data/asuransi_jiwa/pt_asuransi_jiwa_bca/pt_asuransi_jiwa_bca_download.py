@@ -4,6 +4,7 @@ import logging
 import sys
 import time
 from pathlib import Path
+from calendar import month_name
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _downloader_base import (
@@ -16,6 +17,11 @@ SOURCE_URL = "https://www.bcalife.co.id/tentang-kami/laporan-keuangan"
 COMPANY_ID = "pt_asuransi_jiwa_bca"
 COMPANY_NAME = "PT Asuransi Jiwa BCA"
 CATEGORY = "asuransi_jiwa"
+
+def build_bca_report_url(year, month):
+    """Build direct URL to BCA Life month-specific report page."""
+    month_name_id = month_name[month].lower()
+    return f"https://www.bcalife.co.id/tentang-kami/laporan-keuangan/{year}/laporan-keuangan-bca-life-{month_name_id}-{year}"
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
@@ -43,17 +49,15 @@ def main():
     output_dir = args.output_root / period / CATEGORY / COMPANY_ID
     output_pdf = output_dir / f"{COMPANY_ID}_{args.year:04d}_{args.month:02d}.pdf"
     debug_dir = output_dir / "_debug_html"
-    
-    LOGGER.info(f"Fetching from {SOURCE_URL}")
-    
+
+    # For BCA Life, build direct report URL (page has dynamic content)
+    report_url = build_bca_report_url(args.year, args.month)
+    LOGGER.info(f"Fetching from {report_url}")
+
     try:
-        if args.use_browser:
-            LOGGER.info("Using Playwright browser rendering")
-            html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
-        else:
-            html, discovered_url, used_browser = fetch_html_with_smart_fallback(
-                session, SOURCE_URL, args.year, args.month, args.timeout
-            )
+        # Use browser rendering for BCA (dynamic content + PDF viewer)
+        LOGGER.info("Using Playwright browser rendering (PDF viewer embedded)")
+        html, discovered_url = fetch_html_browser(report_url, args.timeout)
     except Exception as e:
         reason = f"failed to fetch: {e}"
         LOGGER.error(reason)
@@ -61,7 +65,7 @@ def main():
             write_debug_html(debug_dir, "", reason)
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
-            "source_page_url": SOURCE_URL, "discovered_page_url": SOURCE_URL,
+            "source_page_url": SOURCE_URL, "discovered_page_url": report_url,
             "pdf_url": "", "target_year": args.year, "target_month": args.month,
             "output_path": str(output_pdf), "status": "error", "reason": reason,
             "timestamp": current_timestamp()
