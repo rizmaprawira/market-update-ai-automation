@@ -358,7 +358,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     output_dir = _output_dir(args.output_root, args.year, args.month)
-    output_path = output_dir / f"{COMPANY_ID}_pdf.pdf"
+    output_path = output_dir / f"{COMPANY_ID}_{args.year:04d}_{args.month:02d}.pdf"
 
     status, reason = _download_file(pdf_url, output_path, args.timeout, args.force, args.dry_run)
 

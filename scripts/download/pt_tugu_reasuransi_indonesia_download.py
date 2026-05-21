@@ -520,6 +520,22 @@ def discover_candidates(
 
         try:
             html, final_url, _, content_type = fetch_html(session, current_url, timeout)
+        except requests.exceptions.HTTPError as exc:
+            fetch_error = summarize_exception(exc)
+            if exc.response.status_code in (404, 410):
+                LOGGER.debug("skipping broken link (%s): %s", exc.response.status_code, current_url)
+                continue
+            if use_browser:
+                try:
+                    html, final_url = render_html_with_browser(current_url, timeout, year)
+                    discovery_method = "playwright"
+                except Exception as browser_exc:
+                    fetch_error = (
+                        f"{fetch_error}; browser fallback failed: "
+                        f"{summarize_exception(browser_exc)}"
+                    )
+            else:
+                raise
         except Exception as exc:
             fetch_error = summarize_exception(exc)
             if use_browser:
@@ -715,7 +731,7 @@ def main(argv: list[str] | None = None) -> int:
         / COMPANY_ID
     )
     debug_dir = output_dir / DEBUG_HTML_DIRNAME
-    output_pdf = output_dir / f"{COMPANY_ID}_pdf.pdf"
+    output_pdf = output_dir / f"{COMPANY_ID}_{args.year:04d}_{args.month:02d}.pdf"
 
     deadline = time.monotonic() + MAX_RUNTIME_SECONDS
     session = build_session()

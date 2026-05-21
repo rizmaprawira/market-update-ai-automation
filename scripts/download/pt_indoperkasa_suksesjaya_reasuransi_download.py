@@ -741,7 +741,7 @@ def main(argv: list[str] | None = None) -> int:
         / COMPANY_ID
     )
     debug_dir = output_dir / DEBUG_HTML_DIRNAME
-    output_pdf = output_dir / f"{COMPANY_ID}_pdf.pdf"
+    output_pdf = output_dir / f"{COMPANY_ID}_{args.year:04d}_{args.month:02d}.pdf"
 
     deadline = time.monotonic() + MAX_RUNTIME_SECONDS
     session = build_session()
