@@ -19,6 +19,16 @@ COMPANY_ID = "pt_asuransi_tugu_pratama_indonesia_tbk"
 COMPANY_NAME = "PT Asuransi Tugu Pratama Indonesia Tbk"
 CATEGORY = "asuransi_umum"
 
+def discover_tugu_reports(html, base_url, year, month):
+    """Tugu publishes annual reports only, not monthly."""
+    candidates = extract_pdf_links(html, base_url, year, month)
+    # Filter for reports that actually mention the target year
+    annual_reports = [c for c in candidates if str(year) in c.url and '2025' not in c.text]
+    if annual_reports:
+        return annual_reports[:1]
+    # If no current year reports found, return empty
+    return []
+
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
     parser.add_argument("--year", "--yyyy", dest="year", type=int, required=True, help="Target year")
@@ -45,10 +55,15 @@ def main():
     debug_dir = output_dir / "_debug_html"
 
     LOGGER.info(f"Fetching from {SOURCE_URL}")
-    LOGGER.info("Using Playwright browser rendering (required for Tugu Pratama)")
 
     try:
-        html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
+        if args.use_browser:
+            LOGGER.info("Using Playwright browser rendering")
+            html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
+        else:
+            html, discovered_url, used_browser = fetch_html_with_smart_fallback(
+                session, SOURCE_URL, args.year, args.month, args.timeout
+            )
     except Exception as e:
         reason = f"failed to fetch: {e}"
         LOGGER.error(reason)
@@ -63,7 +78,7 @@ def main():
         }])
         return 1
 
-    candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
+    candidates = discover_tugu_reports(html, discovered_url, args.year, args.month)
 
     if not candidates:
         reason = "no PDF candidates found"

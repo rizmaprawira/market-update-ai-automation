@@ -9,45 +9,36 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from _downloader_base import (
     build_session, extract_pdf_links, download_pdf, write_manifest, write_debug_html,
-    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp, discover_download_candidate, PDFCandidate,
-    MONTH_LABELS
+    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp, discover_download_candidate
 )
-from playwright.sync_api import sync_playwright
 
 LOGGER = logging.getLogger("download_pt_asuransi_raksa_pratikara")
 SOURCE_URL = "https://www.raksaonline.com/laporan-keuangan/"
 FALLBACK_URL = SOURCE_URL
 COMPANY_ID = "pt_asuransi_raksa_pratikara"
-
-def find_raksa_pdf_with_dropdown(year, month, timeout=30):
-    """Use Playwright to interact with Raksa dropdowns and find PDF."""
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch()
-            page = browser.new_page()
-            page.goto(SOURCE_URL, wait_until="networkidle", timeout=timeout*1000)
-
-            # Wait for and select year dropdown
-            year_select = page.locator("select[name*='year'], select[name*='tahun'], #year, #tahun")
-            if year_select.count() > 0:
-                year_select.first.select_option(str(year))
-                page.wait_for_timeout(500)
-
-            # Wait for and select month dropdown
-            month_select = page.locator("select[name*='month'], select[name*='bulan'], #month, #bulan")
-            if month_select.count() > 0:
-                month_select.first.select_option(str(month).zfill(2))
-                page.wait_for_timeout(1000)
-
-            # Extract HTML after selections
-            html = page.content()
-            browser.close()
-            return html, SOURCE_URL
-    except Exception as e:
-        LOGGER.debug(f"Dropdown interaction failed: {e}")
-        return None, SOURCE_URL
 COMPANY_NAME = "PT Asuransi Raksa Pratikara"
 CATEGORY = "asuransi_umum"
+
+def discover_raksa_reports(html, base_url, year, month):
+    """Raksa-specific: links only have month names, no year info."""
+    from _downloader_base import MONTH_LABELS, PDFCandidate
+    from bs4 import BeautifulSoup
+    from urllib.parse import urljoin
+
+    candidates = []
+    soup = BeautifulSoup(html, 'html.parser')
+    month_label = MONTH_LABELS[month]
+
+    for link in soup.find_all('a', href=True):
+        text = link.get_text(strip=True)
+        href = link.get('href', '')
+
+        if month_label in text and ('laporan' in text.lower() or 'pdf' in href.lower()):
+            url = urljoin(base_url, href)
+            score = 100 if month_label in text else 50
+            candidates.append(PDFCandidate(url=url, text=text, score=score, discovered_url=base_url))
+
+    return sorted(candidates, key=lambda x: x.score, reverse=True)[:1]
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
@@ -75,12 +66,15 @@ def main():
     debug_dir = output_dir / "_debug_html"
     
     LOGGER.info(f"Fetching from {SOURCE_URL}")
-    LOGGER.info("Using Playwright with dropdown interaction (required for Raksa)")
 
     try:
-        html, discovered_url = find_raksa_pdf_with_dropdown(args.year, args.month, args.timeout)
-        if not html:
-            raise Exception("Dropdown interaction returned no content")
+        if args.use_browser:
+            LOGGER.info("Using Playwright browser rendering")
+            html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
+        else:
+            html, discovered_url, used_browser = fetch_html_with_smart_fallback(
+                session, SOURCE_URL, args.year, args.month, args.timeout
+            )
     except Exception as e:
         reason = f"failed to fetch: {e}"
         LOGGER.error(reason)
@@ -94,9 +88,9 @@ def main():
             "timestamp": current_timestamp()
         }])
         return 1
-    
-    candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
-    
+
+    candidates = discover_raksa_reports(html, discovered_url, args.year, args.month)
+
     if not candidates:
         reason = "no PDF candidates found"
         LOGGER.warning(reason)

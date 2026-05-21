@@ -10,62 +10,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _downloader_base import (
     build_session, extract_pdf_links, download_pdf, write_manifest, write_debug_html,
     fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback,
-    discover_download_candidate, current_timestamp, MONTH_LABELS
+    discover_download_candidate, current_timestamp
 )
-from playwright.sync_api import sync_playwright
 
 LOGGER = logging.getLogger("download_pt_asuransi_etiqa_internasional_indonesia")
 SOURCE_URL = "https://www.etiqa.co.id/hubungan-investor/"
 FALLBACK_URL = "https://etiqa.com/financial-statements/"
 COMPANY_ID = "pt_asuransi_etiqa_internasional_indonesia"
-
-def find_etiqa_pdf_with_dropdown(year, month, timeout=30):
-    """Use Playwright to interact with Etiqa dropdowns and find PDF."""
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch()
-            page = browser.new_page()
-            page.goto(SOURCE_URL, wait_until="networkidle", timeout=timeout*1000)
-
-            # Etiqa has 3 dropdowns - need to find and select them
-            # Look for any select elements that might be year/month/period related
-            selects = page.locator("select")
-            select_count = selects.count()
-
-            if select_count >= 2:
-                # Assuming first is year, second is month (third might be type)
-                LOGGER.debug(f"Found {select_count} dropdowns on Etiqa page")
-
-                try:
-                    selects.nth(0).select_option(str(year))
-                    page.wait_for_timeout(500)
-                except:
-                    pass
-
-                try:
-                    selects.nth(1).select_option(str(month).zfill(2))
-                    page.wait_for_timeout(500)
-                except:
-                    LOGGER.debug("Could not select month dropdown")
-
-                try:
-                    # If there's a third dropdown (type: conventional/syariah), try conventional first
-                    if select_count >= 3:
-                        selects.nth(2).select_option("Laporan Keuangan Konvensional")
-                        page.wait_for_timeout(500)
-                except:
-                    pass
-
-                page.wait_for_timeout(1000)
-
-            html = page.content()
-            browser.close()
-            return html, SOURCE_URL
-    except Exception as e:
-        LOGGER.debug(f"Etiqa dropdown interaction failed: {e}")
-        return None, SOURCE_URL
 COMPANY_NAME = "PT Asuransi Etiqa Internasional Indonesia"
 CATEGORY = "asuransi_umum"
+
+def discover_etiqa_reports(html, base_url, year, month):
+    """Etiqa-specific: filter for exact month/year match."""
+    from _downloader_base import MONTH_LABELS
+    candidates = extract_pdf_links(html, base_url, year, month)
+    if not candidates:
+        return []
+    month_name = MONTH_LABELS[month]
+    exact = [c for c in candidates if month_name in c.text and str(year) in c.url]
+    return exact if exact else candidates[:1]
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
@@ -97,11 +60,15 @@ def main():
     fetch_error = None
 
     LOGGER.info(f"Fetching from {SOURCE_URL}")
-    LOGGER.info("Using Playwright with dropdown interaction (required for Etiqa)")
+
     try:
-        html, discovered_url = find_etiqa_pdf_with_dropdown(args.year, args.month, args.timeout)
-        if not html:
-            raise Exception("Dropdown interaction returned no content")
+        if args.use_browser:
+            LOGGER.info("Using Playwright browser rendering")
+            html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
+        else:
+            html, discovered_url, used_browser = fetch_html_with_smart_fallback(
+                session, SOURCE_URL, args.year, args.month, args.timeout
+            )
     except Exception as e:
         fetch_error = str(e)
         LOGGER.warning(f"Primary URL failed: {fetch_error}")
@@ -132,7 +99,8 @@ def main():
             }])
             return 1
 
-    candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
+    candidates = discover_etiqa_reports(html, discovered_url, args.year, args.month)
+
     if not candidates:
         try:
             fallback = discover_download_candidate(

@@ -88,6 +88,8 @@ def is_probable_pdf_url(url):
     return (
         path.endswith(".pdf")
         or ".pdf" in path
+        or "/assets/pdf/" in path
+        or "/pdf/" in path
         or "download=true" in query
         or "view=true" in query
     )
