@@ -32,7 +32,7 @@ COMPANY_WEBSITES = {
 
 def get_all_company_scripts() -> list[Path]:
     """Return sorted list of all company download scripts."""
-    scripts = sorted(SCRIPT_DIR.glob("pt_*_download.py"))
+    scripts = sorted(SCRIPT_DIR.glob("reasuransi/**/*_download.py"))
     return [
         script
         for script in scripts

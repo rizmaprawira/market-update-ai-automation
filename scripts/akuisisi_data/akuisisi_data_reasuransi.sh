@@ -5,9 +5,9 @@ set -o pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  ./scripts/download/akuisisi_data_reasuransi.sh --yyyy 2026 --mm 03 [options]
+  ./scripts/akuisisi_data/akuisisi_data_reasuransi.sh --yyyy 2026 --mm 03 [options]
 
-Comprehensive data acquisition: Download PDFs + PDF-to-Text conversion with OCR for maipark
+Comprehensive data acquisition: Download PDFs → PDF-to-Text (with OCR) → Extract Key Metrics
 
 Required:
   --yyyy <year>                  4-digit year (e.g. 2026)
@@ -18,7 +18,7 @@ Optional:
   --timeout <sec>                Timeout per company downloader (default: 30)
   --delay <sec>                  Delay between companies (default: 2)
   --mamba-cache-home <dir>       Cache home for mamba lockfiles (default: /tmp/market-update-mamba-cache)
-  --resume                       Skip existing PDFs/TXTs
+  --resume                       Skip existing PDFs/TXTs/metrics
   --fail-fast                    Stop on first failure
   --force                        Overwrite existing PDFs
   --dry-run                      Test run without actual download/conversion
@@ -26,8 +26,9 @@ Optional:
   --use-browser                  Use browser rendering for discovery
   --debug-html                   Save HTML debug files
   --skip-nusantara               Skip PT Reasuransi Nusantara Makmur
-  --skip-download                Skip download phase, only do pdftotext
-  --skip-pdftotext               Skip pdftotext phase, only download
+  --skip-download                Skip Phase 1 (download), do phases 2+3
+  --skip-pdftotext               Skip Phase 2 (pdftotext), do phases 1+3
+  --skip-key-metric              Skip Phase 3 (metrics extraction), do phases 1+2
   --help                         Show this help
 USAGE
 }
@@ -60,6 +61,7 @@ FLAG_DEBUG_HTML=false
 FLAG_SKIP_NUSANTARA=false
 FLAG_SKIP_DOWNLOAD=false
 FLAG_SKIP_PDFTOTEXT=false
+FLAG_SKIP_KEY_METRIC=false
 
 LOG_FILE=""
 
@@ -127,6 +129,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-pdftotext)
       FLAG_SKIP_PDFTOTEXT=true
+      shift
+      ;;
+    --skip-key-metric)
+      FLAG_SKIP_KEY_METRIC=true
       shift
       ;;
     --help|-h)
@@ -206,6 +212,8 @@ DOWNLOAD_SUCCESS=0
 DOWNLOAD_FAIL=0
 PDFTOTEXT_SUCCESS=0
 PDFTOTEXT_FAIL=0
+KEY_METRIC_SUCCESS=0
+KEY_METRIC_FAIL=0
 
 # ============================================================================
 # PHASE 1: DOWNLOAD PDFs
@@ -215,20 +223,20 @@ if [[ "$FLAG_SKIP_DOWNLOAD" != "true" ]]; then
   log "INFO" "======================================================================="
 
   COMPANY_SCRIPTS=(
-    "pt_indoperkasa_suksesjaya_reasuransi_download.py"
-    "pt_maskapai_reasuransi_indonesia_download.py"
-    "pt_orion_reasuransi_indonesia_download.py"
-    "pt_reasuransi_indonesia_utama_download.py"
-    "pt_reasuransi_maipark_indonesia_download.py"
-    "pt_reasuransi_nasional_indonesia_download.py"
-    "pt_reasuransi_nusantara_makmur_download.py"
-    "pt_tugu_reasuransi_indonesia_download.py"
+    "reasuransi/pt_indoperkasa_suksesjaya_reasuransi/pt_indoperkasa_suksesjaya_reasuransi_download.py"
+    "reasuransi/pt_maskapai_reasuransi_indonesia/pt_maskapai_reasuransi_indonesia_download.py"
+    "reasuransi/pt_orion_reasuransi_indonesia/pt_orion_reasuransi_indonesia_download.py"
+    "reasuransi/pt_reasuransi_indonesia_utama/pt_reasuransi_indonesia_utama_download.py"
+    "reasuransi/pt_reasuransi_maipark_indonesia/pt_reasuransi_maipark_indonesia_download.py"
+    "reasuransi/pt_reasuransi_nasional_indonesia/pt_reasuransi_nasional_indonesia_download.py"
+    "reasuransi/pt_reasuransi_nusantara_makmur/pt_reasuransi_nusantara_makmur_download.py"
+    "reasuransi/pt_tugu_reasuransi_indonesia/pt_tugu_reasuransi_indonesia_download.py"
   )
 
   if [[ "$FLAG_SKIP_NUSANTARA" == "true" ]]; then
     FILTERED=()
     for s in "${COMPANY_SCRIPTS[@]}"; do
-      if [[ "$s" == "pt_reasuransi_nusantara_makmur_download.py" ]]; then
+      if [[ "$s" == *"pt_reasuransi_nusantara_makmur"* ]]; then
         continue
       fi
       FILTERED+=("$s")
@@ -252,8 +260,8 @@ if [[ "$FLAG_SKIP_DOWNLOAD" != "true" ]]; then
       continue
     fi
 
-    company_snake="${script_name%_download.py}"
-    company_dir="${PERIOD_DIR}/${company_snake}"
+    company_snake="$(basename "${script_name%_download.py}")"
+    company_dir="${PERIOD_DIR}/reasuransi/${company_snake}"
     pdf_path="${company_dir}/${company_snake}_${TAHUN}_${BULAN}.pdf"
 
     if [[ "$MODE_RESUME" == "true" && -f "$pdf_path" && "$FLAG_FORCE" == "false" ]]; then
@@ -398,6 +406,99 @@ if [[ "$FLAG_SKIP_PDFTOTEXT" != "true" && "$FLAG_DRY_RUN" != "true" && "$FLAG_DI
 fi
 
 # ============================================================================
+# PHASE 3: Extract Key Metrics
+# ============================================================================
+if [[ "$FLAG_SKIP_KEY_METRIC" != "true" && "$FLAG_DRY_RUN" != "true" && "$FLAG_DISCOVER_ONLY" != "true" ]]; then
+  log "INFO" "PHASE 3: Extracting Key Metrics from TXT files..."
+  log "INFO" "======================================================================="
+
+  METRIC_SCRIPTS=(
+    "reasuransi/pt_maskapai_reasuransi_indonesia/pt_maskapai_reasuransi_indonesia_key_metric.py"
+    "reasuransi/pt_indoperkasa_suksesjaya_reasuransi/pt_indoperkasa_suksesjaya_reasuransi_key_metric.py"
+    "reasuransi/pt_orion_reasuransi_indonesia/pt_orion_reasuransi_indonesia_key_metric.py"
+    "reasuransi/pt_reasuransi_indonesia_utama/pt_reasuransi_indonesia_utama_key_metric.py"
+    "reasuransi/pt_reasuransi_maipark_indonesia/pt_reasuransi_maipark_indonesia_key_metric.py"
+    "reasuransi/pt_reasuransi_nasional_indonesia/pt_reasuransi_nasional_indonesia_key_metric.py"
+    "reasuransi/pt_reasuransi_nusantara_makmur/pt_reasuransi_nusantara_makmur_key_metric.py"
+    "reasuransi/pt_tugu_reasuransi_indonesia/pt_tugu_reasuransi_indonesia_key_metric.py"
+  )
+
+  if [[ "$FLAG_SKIP_NUSANTARA" == "true" ]]; then
+    FILTERED=()
+    for s in "${METRIC_SCRIPTS[@]}"; do
+      if [[ "$s" == *"pt_reasuransi_nusantara_makmur"* ]]; then
+        continue
+      fi
+      FILTERED+=("$s")
+    done
+    METRIC_SCRIPTS=("${FILTERED[@]}")
+  fi
+
+  TOTAL_COUNT="${#METRIC_SCRIPTS[@]}"
+  INDEX=0
+
+  for script_name in "${METRIC_SCRIPTS[@]}"; do
+    INDEX=$((INDEX + 1))
+    script_path="${SCRIPT_DIR}/${script_name}"
+
+    if [[ ! -f "$script_path" ]]; then
+      log "ERROR" "[$INDEX/$TOTAL_COUNT] ${script_name} -> FAIL (script_not_found)"
+      KEY_METRIC_FAIL=$((KEY_METRIC_FAIL + 1))
+      if [[ "$MODE_FAIL_FAST" == "true" ]]; then
+        break
+      fi
+      continue
+    fi
+
+    company_snake="$(basename "${script_name%_key_metric.py}")"
+    company_dir="${PERIOD_DIR}/reasuransi/${company_snake}"
+    txt_path="${company_dir}/${company_snake}_${TAHUN}_${BULAN}.txt"
+    metric_csv="${company_dir}/${company_snake}_key_metric_${TAHUN}_${BULAN}.csv"
+
+    if [[ ! -f "$txt_path" ]]; then
+      log "WARN" "[$INDEX/$TOTAL_COUNT] ${company_snake} -> SKIP (txt_file_not_found)"
+      continue
+    fi
+
+    if [[ "$MODE_RESUME" == "true" && -f "$metric_csv" ]]; then
+      log "INFO" "[$INDEX/$TOTAL_COUNT] ${company_snake} -> SKIP (resume_skip_existing_csv)"
+      continue
+    fi
+
+    log "INFO" "[$INDEX/$TOTAL_COUNT] RUN ${company_snake}"
+    cmd=(
+      env XDG_CACHE_HOME="$MAMBA_CACHE_HOME" mamba run -n market_update python "$script_path"
+      --yyyy "$TAHUN"
+      --mm "$((10#$BULAN))"
+    )
+
+    if "${cmd[@]}" >> "$LOG_FILE" 2>&1; then
+      exit_code=0
+    else
+      exit_code=$?
+    fi
+
+    if [[ "$exit_code" -eq 0 && -f "$metric_csv" ]]; then
+      log "INFO" "[$INDEX/$TOTAL_COUNT] ${company_snake} -> SUCCESS (metrics_extracted)"
+      KEY_METRIC_SUCCESS=$((KEY_METRIC_SUCCESS + 1))
+    else
+      log "ERROR" "[$INDEX/$TOTAL_COUNT] ${company_snake} -> FAIL (metrics_extraction_failed)"
+      KEY_METRIC_FAIL=$((KEY_METRIC_FAIL + 1))
+      if [[ "$MODE_FAIL_FAST" == "true" ]]; then
+        break
+      fi
+    fi
+
+    if [[ "$INDEX" -lt "$TOTAL_COUNT" ]]; then
+      sleep "$DELAY_SEC"
+    fi
+  done
+
+  log "INFO" "PHASE 3 Complete | success=${KEY_METRIC_SUCCESS} fail=${KEY_METRIC_FAIL}"
+  log "INFO" ""
+fi
+
+# ============================================================================
 # FINAL SUMMARY
 # ============================================================================
 log "INFO" "======================================================================"
@@ -415,10 +516,19 @@ log "INFO" "====================================================================
     echo "- Status: SKIPPED"
   fi
   echo ""
-  echo "## Phase 2: PDF to Text Conversion"
+  echo "## Phase 2: PDF to Text Conversion (with OCR)"
   if [[ "$FLAG_SKIP_PDFTOTEXT" != "true" && "$FLAG_DRY_RUN" != "true" && "$FLAG_DISCOVER_ONLY" != "true" ]]; then
     echo "- Success: ${PDFTOTEXT_SUCCESS}"
     echo "- Fail: ${PDFTOTEXT_FAIL}"
+  else
+    echo "- Status: SKIPPED"
+  fi
+  echo ""
+  echo "## Phase 3: Extract Key Metrics"
+  if [[ "$FLAG_SKIP_KEY_METRIC" != "true" && "$FLAG_DRY_RUN" != "true" && "$FLAG_DISCOVER_ONLY" != "true" ]]; then
+    echo "- Success: ${KEY_METRIC_SUCCESS}"
+    echo "- Fail: ${KEY_METRIC_FAIL}"
+    echo "- Database: data/${PERIODE}/database_reasuransi_${TAHUN}_${BULAN}.csv"
   else
     echo "- Status: SKIPPED"
   fi

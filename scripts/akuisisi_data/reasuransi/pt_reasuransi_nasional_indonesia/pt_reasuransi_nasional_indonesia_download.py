@@ -134,7 +134,7 @@ def _validate_args(args: argparse.Namespace) -> tuple[bool, str]:
 
 
 def _output_dir(output_root: Path, year: int, month: int) -> Path:
-    return output_root / f"{year:04d}-{month:02d}" / COMPANY_ID
+    return output_root / f"{year:04d}-{month:02d}" / "reasuransi" / COMPANY_ID
 
 
 def _ascii_fold(value: str) -> str:

@@ -632,7 +632,7 @@ def main(argv: list[str] | None = None) -> int:
 
     start_time = time.monotonic()
     period = f"{args.year:04d}-{args.month:02d}"
-    output_dir = args.output_root / period / COMPANY_ID
+    output_dir = args.output_root / period / "reasuransi" / COMPANY_ID
     output_pdf = output_dir / f"{COMPANY_ID}_{args.year:04d}_{args.month:02d}.pdf"
     debug_dir = output_dir / DEBUG_HTML_DIRNAME
 

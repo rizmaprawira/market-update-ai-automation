@@ -821,6 +821,7 @@ def main(argv: list[str] | None = None) -> int:
     output_dir = (
         args.output_root
         / f"{args.year:04d}-{args.month:02d}"
+        / "reasuransi"
         / COMPANY_ID
     )
     debug_dir = output_dir / DEBUG_HTML_DIRNAME

@@ -489,7 +489,7 @@ for raw_url in "${URLS[@]}"; do
   fi
 
   COMPANY_SNAKE_CASE="$(company_snake_from_url "$WEBSITE_URL")"
-  COMPANY_DIR="${PERIOD_DIR}/${COMPANY_SNAKE_CASE}"
+  COMPANY_DIR="${PERIOD_DIR}/reasuransi/${COMPANY_SNAKE_CASE}"
   JSON_OUTPUT_FILE="${COMPANY_DIR}/${COMPANY_SNAKE_CASE}_raw.json"
   CSV_OUTPUT_FILE="${COMPANY_DIR}/${COMPANY_SNAKE_CASE}_row.csv"
   STATUS_FILE="${COMPANY_DIR}/status.txt"

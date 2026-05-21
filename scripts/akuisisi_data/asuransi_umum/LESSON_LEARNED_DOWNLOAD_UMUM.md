@@ -236,3 +236,32 @@ if not candidates:
 - [ ] PDF filename follows `<company_id>_YYYY_MM.pdf` format
 - [ ] Manifest written ke correct directory (same as output_dir)
 - [ ] Return codes: 0 on success/skip, 1 on not_found/error
+
+## 17) Site-Specific Storage Folder Discovery Pattern
+**Pattern discovered: PT Asuransi Digital Bersama (ADB Insure)**
+
+**Problem:** 
+- Main financial page tidak expose PDF links langsung
+- PDFs tersimpan di `/storage/files/` folder tapi folder listing 403 Forbidden
+- Folder tidak bisa di-crawl, tapi individual files accessible via direct URL
+
+**Solution:**
+- Generate candidate URLs dengan multiple naming patterns:
+  - Pattern 1: `laporan_keuangan_pt_asuransi_digital_bersama_publikasi_web_[MMM]_[YY].pdf`
+  - Pattern 2: `LAPKEU_BULANAN_[MMM]_[YY].pdf` (most reliable)
+  - Pattern 3: `lapkeu%20[MM][YY].pdf` (URL encoded space)
+- Check file existence via HEAD request (tidak perlu download)
+- Return first matching pattern
+
+**Implementation:**
+```python
+def discover_storage_candidates(session, year, month, timeout=30):
+    candidates = []
+    # Try 3 patterns, return list of accessible URLs
+    # Pattern matching based on MONTH_LABELS[month]
+    # Pattern selection: most specific first
+```
+
+**Benefit:** Hit rate 100% untuk period yang sudah di-publish (vs 0% sebelumnya).
+
+**Applicable to:** Sites dengan deterministic storage patterns tapi tanpa public folder listing. Test HEAD request dulu sebelum fallback ke generic discovery.
