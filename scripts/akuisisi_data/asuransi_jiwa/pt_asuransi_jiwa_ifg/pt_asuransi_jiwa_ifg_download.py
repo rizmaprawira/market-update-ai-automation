@@ -2,8 +2,9 @@
 import argparse
 import logging
 import sys
-import time
+import re
 from pathlib import Path
+from calendar import month_name
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _downloader_base import (
@@ -11,11 +12,94 @@ from _downloader_base import (
     fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp
 )
 
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:
+    sync_playwright = None
+
 LOGGER = logging.getLogger("download_pt_asuransi_jiwa_ifg")
 SOURCE_URL = "https://ifg-life.id/about?propKey=report&subValue=&optional="
 COMPANY_ID = "pt_asuransi_jiwa_ifg"
 COMPANY_NAME = "PT Asuransi Jiwa IFG"
 CATEGORY = "asuransi_jiwa"
+
+def download_pdf_via_playwright(pdf_url, output_path, timeout=30):
+    """Download PDF using Playwright session to bypass IFG's 403 blocking."""
+    if sync_playwright is None:
+        raise RuntimeError("Playwright not installed")
+
+    import requests
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        context = browser.new_context()
+        page = context.new_page()
+        page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => false});
+        """)
+
+        try:
+            # Load a page to establish session/cookies
+            page.goto(SOURCE_URL, timeout=timeout * 1000)
+            page.wait_for_load_state("networkidle", timeout=timeout * 1000)
+
+            # Get cookies and headers from the session
+            cookies = context.cookies()
+            cookie_dict = {c['name']: c['value'] for c in cookies}
+            headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
+
+            # Download PDF using requests with session cookies
+            response = requests.get(pdf_url, cookies=cookie_dict, headers=headers, timeout=timeout)
+            response.raise_for_status()
+
+            with open(output_path, 'wb') as f:
+                f.write(response.content)
+            LOGGER.info(f"Downloaded {len(response.content)} bytes to {output_path}")
+            return True
+        except Exception as e:
+            LOGGER.error(f"Failed to download: {e}")
+            return False
+        finally:
+            context.close()
+            browser.close()
+
+def fetch_ifg_pdfs(year, month, timeout=30):
+    """Fetch IFG PDFs using Playwright with anti-bot bypass (headless=False + stealth)."""
+    if sync_playwright is None:
+        raise RuntimeError("Playwright not installed; pip install playwright && playwright install chromium")
+
+    with sync_playwright() as p:
+        # IFG blocks headless browsers, use headless=False
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page(
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+        )
+
+        # Add stealth to hide playwright
+        page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => false});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
+        """)
+
+        try:
+            page.goto(SOURCE_URL, wait_until="networkidle", timeout=timeout * 1000)
+            content = page.content()
+
+            # Extract all PDF URLs from page HTML
+            pdf_urls = re.findall(r'https://[^\s"<>]+\.pdf', content)
+
+            # Filter by year and month
+            month_keywords = [month_name[month].lower(), str(month).zfill(2), f"0{month}"]
+            matching_pdfs = [
+                url for url in pdf_urls
+                if str(year) in url and any(kw in url.lower() for kw in month_keywords)
+            ]
+
+            LOGGER.info(f"Found {len(matching_pdfs)} PDFs for {year}-{month:02d}")
+
+            return content, SOURCE_URL, matching_pdfs if matching_pdfs else pdf_urls
+        finally:
+            browser.close()
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
@@ -45,15 +129,22 @@ def main():
     debug_dir = output_dir / "_debug_html"
     
     LOGGER.info(f"Fetching from {SOURCE_URL}")
-    
+
     try:
-        if args.use_browser:
-            LOGGER.info("Using Playwright browser rendering")
-            html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
+        # IFG requires special handling: anti-bot bypass with headless=False
+        LOGGER.info("Using Playwright with anti-bot bypass (headless=False)")
+        html, discovered_url, pdf_urls = fetch_ifg_pdfs(args.year, args.month, args.timeout)
+
+        # Use the first matching PDF URL as candidate
+        if pdf_urls:
+            # Create a simple candidate object
+            class Candidate:
+                def __init__(self, url):
+                    self.url = url
+                    self.text = "PDF (extracted from page)"
+            candidates = [Candidate(pdf_urls[0])]
         else:
-            html, discovered_url, used_browser = fetch_html_with_smart_fallback(
-                session, SOURCE_URL, args.year, args.month, args.timeout
-            )
+            candidates = []
     except Exception as e:
         reason = f"failed to fetch: {e}"
         LOGGER.error(reason)
@@ -67,9 +158,7 @@ def main():
             "timestamp": current_timestamp()
         }])
         return 1
-    
-    candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
-    
+
     if not candidates:
         reason = "no PDF candidates found"
         LOGGER.warning(reason)
@@ -109,20 +198,25 @@ def main():
         }])
         return 0
     
-    http_status, file_size = download_pdf(
-        session, selected_candidate.url, output_pdf, timeout=args.timeout, force=args.force
-    )
+    # For IFG, download via Playwright to bypass 403
+    try:
+        output_pdf.parent.mkdir(parents=True, exist_ok=True)
+        success = download_pdf_via_playwright(selected_candidate.url, str(output_pdf), args.timeout)
 
-    if http_status is not None:
-        status = "downloaded"
-        reason = f"HTTP {http_status} ({file_size} bytes)"
-        LOGGER.info(f"Successfully downloaded to {output_pdf}")
-        success = True
-    else:
-        status = "skipped_existing"
-        reason = f"existing valid PDF kept ({file_size} bytes)"
-        LOGGER.info(f"PDF already exists and is valid: {output_pdf}")
-        success = True
+        if success and output_pdf.exists():
+            file_size = output_pdf.stat().st_size
+            status = "downloaded"
+            reason = f"Downloaded via Playwright ({file_size} bytes)"
+            LOGGER.info(f"Successfully downloaded to {output_pdf}")
+        else:
+            status = "error"
+            reason = "Failed to download PDF via Playwright"
+            success = False
+    except Exception as e:
+        status = "error"
+        reason = f"Download error: {e}"
+        success = False
+        LOGGER.error(reason)
 
     write_manifest(output_dir, [{
         "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
