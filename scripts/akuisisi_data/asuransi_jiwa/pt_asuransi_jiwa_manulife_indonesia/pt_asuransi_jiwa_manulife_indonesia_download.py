@@ -1,9 +1,10 @@
-"""Download financial reports for PT Asuransi Allianz Utama Indonesia."""
+"""Download financial reports for PT Asuransi Jiwa Manulife Indonesia."""
 import argparse
 import logging
 import sys
-import time
+import requests
 from pathlib import Path
+from calendar import month_name
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _downloader_base import (
@@ -11,11 +12,69 @@ from _downloader_base import (
     fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp
 )
 
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:
+    sync_playwright = None
+
 LOGGER = logging.getLogger("download_pt_asuransi_jiwa_manulife_indonesia")
 SOURCE_URL = "https://www.manulife.co.id/id/tentang-kami/laporan-keuangan.html"
 COMPANY_ID = "pt_asuransi_jiwa_manulife_indonesia"
 COMPANY_NAME = "PT Asuransi Jiwa Manulife Indonesia"
 CATEGORY = "asuransi_jiwa"
+
+def download_pdf_via_playwright(pdf_url, output_path, timeout=30):
+    """Download PDF using Playwright session to bypass 403 blocking."""
+    if sync_playwright is None:
+        raise RuntimeError("Playwright not installed")
+
+    import requests
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context()
+        page = context.new_page()
+        page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => false});
+        """)
+
+        try:
+            # Load source page to establish session (short timeout, don't wait for networkidle)
+            page.goto(SOURCE_URL, timeout=15000, wait_until="domcontentloaded")
+            page.wait_for_timeout(1000)
+
+            # Get cookies from session
+            cookies = context.cookies()
+            cookie_dict = {c['name']: c['value'] for c in cookies}
+            headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
+
+            # Download PDF
+            response = requests.get(pdf_url, cookies=cookie_dict, headers=headers, timeout=timeout)
+            response.raise_for_status()
+
+            with open(output_path, 'wb') as f:
+                f.write(response.content)
+            LOGGER.info(f"Downloaded {len(response.content)} bytes to {output_path}")
+            return True
+        except Exception as e:
+            LOGGER.error(f"Failed to download: {e}")
+            return False
+        finally:
+            context.close()
+            browser.close()
+
+def build_manulife_pdf_url(year, month):
+    """Build direct URL to Manulife monthly financial report PDF."""
+    # Map month number to Indonesian month names as used in URL
+    month_names_id = {
+        1: "Januari", 2: "Februari", 3: "Maret", 4: "April",
+        5: "Mei", 6: "Juni", 7: "Juli", 8: "Agustus",
+        9: "September", 10: "Oktober", 11: "November", 12: "Desember"
+    }
+
+    month_id = month_names_id.get(month, month_name[month])
+    # URL encode spaces as %20
+    pdf_filename = f"Laporan%20Keuangan%20Publikasi%20Konvensional%20{month_id}%20{year}.pdf"
+    return f"https://www.manulife.co.id/content/dam/insurance/id/documents/laporan-keuangan/laporan-keuangan-bulanan-konvensional/{year}/{pdf_filename}"
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
@@ -44,32 +103,27 @@ def main():
     output_pdf = output_dir / f"{COMPANY_ID}_{args.year:04d}_{args.month:02d}.pdf"
     debug_dir = output_dir / "_debug_html"
     
-    LOGGER.info(f"Fetching from {SOURCE_URL}")
-    
+    # Build direct URL to Manulife monthly report PDF
+    pdf_url = build_manulife_pdf_url(args.year, args.month)
+    LOGGER.info(f"Built PDF URL: {pdf_url}")
+    discovered_url = SOURCE_URL
+
+    # Create a simple candidate object
+    class Candidate:
+        def __init__(self, url):
+            self.url = url
+            self.text = "PDF (built URL)"
+
+    candidates = [Candidate(pdf_url)]
+
+    # Validate URL exists with a HEAD request
     try:
-        if args.use_browser:
-            LOGGER.info("Using Playwright browser rendering")
-            html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
-        else:
-            html, discovered_url, used_browser = fetch_html_with_smart_fallback(
-                session, SOURCE_URL, args.year, args.month, args.timeout
-            )
+        resp = session.head(pdf_url, timeout=args.timeout, allow_redirects=True)
+        if resp.status_code != 200:
+            LOGGER.warning(f"PDF URL returned status {resp.status_code}, trying anyway...")
     except Exception as e:
-        reason = f"failed to fetch: {e}"
-        LOGGER.error(reason)
-        if args.debug_html:
-            write_debug_html(debug_dir, "", reason)
-        write_manifest(output_dir, [{
-            "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
-            "source_page_url": SOURCE_URL, "discovered_page_url": SOURCE_URL,
-            "pdf_url": "", "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "error", "reason": reason,
-            "timestamp": current_timestamp()
-        }])
-        return 1
-    
-    candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
-    
+        LOGGER.warning(f"Could not validate PDF URL: {e}")
+
     if not candidates:
         reason = "no PDF candidates found"
         LOGGER.warning(reason)
@@ -109,20 +163,25 @@ def main():
         }])
         return 0
     
-    http_status, file_size = download_pdf(
-        session, selected_candidate.url, output_pdf, timeout=args.timeout, force=args.force
-    )
+    # Download via Playwright to bypass 403 blocking
+    try:
+        output_pdf.parent.mkdir(parents=True, exist_ok=True)
+        success = download_pdf_via_playwright(selected_candidate.url, str(output_pdf), args.timeout)
 
-    if http_status is not None:
-        status = "downloaded"
-        reason = f"HTTP {http_status} ({file_size} bytes)"
-        LOGGER.info(f"Successfully downloaded to {output_pdf}")
-        success = True
-    else:
-        status = "skipped_existing"
-        reason = f"existing valid PDF kept ({file_size} bytes)"
-        LOGGER.info(f"PDF already exists and is valid: {output_pdf}")
-        success = True
+        if success and output_pdf.exists():
+            file_size = output_pdf.stat().st_size
+            status = "downloaded"
+            reason = f"Downloaded via Playwright ({file_size} bytes)"
+            LOGGER.info(f"Successfully downloaded to {output_pdf}")
+        else:
+            status = "error"
+            reason = "Failed to download PDF via Playwright"
+            success = False
+    except Exception as e:
+        status = "error"
+        reason = f"Download error: {e}"
+        success = False
+        LOGGER.error(reason)
 
     write_manifest(output_dir, [{
         "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
