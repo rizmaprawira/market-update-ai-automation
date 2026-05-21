@@ -19,6 +19,56 @@ COMPANY_ID = "pt_bri_asuransi_indonesia"
 COMPANY_NAME = "PT BRI Asuransi Indonesia"
 CATEGORY = "asuransi_umum"
 
+def discover_bri_reports(html, base_url, year, month, timeout=30):
+    """
+    BRI serves reports via broadcast.api.brinesia.app with dynamic gallery IDs.
+    Pattern: /FinancialReportGallery/{GALLERY_ID}/LaporanKeuanganPublikasi{Month}{Year}Konvensional.pdf
+    """
+    import re
+
+    candidates = []
+
+    # Try to extract gallery ID from page (may be in JavaScript or data attributes)
+    gallery_matches = re.findall(r'[A-F0-9]{64}', html)
+
+    if not gallery_matches:
+        # Fallback: use a known gallery ID if available (would need to be updated periodically)
+        # For now, we note that BRI's API requires discovery of gallery ID from the live page
+        LOGGER.debug("Could not extract gallery ID from page")
+        return []
+
+    gallery_id = gallery_matches[0]  # Use first match
+
+    # Build URL with Indonesian month name
+    month_names = {
+        1: "Januari", 2: "Februari", 3: "Maret", 4: "April", 5: "Mei", 6: "Juni",
+        7: "Juli", 8: "Agustus", 9: "September", 10: "Oktober", 11: "November", 12: "Desember"
+    }
+    month_name = month_names.get(month, "")
+
+    if not month_name:
+        return []
+
+    pdf_url = f"https://broadcast.api.brinesia.app/FinancialReportGallery/{gallery_id}/LaporanKeuanganPublikasi{month_name}{year}Konvensional.pdf"
+
+    # Verify URL exists
+    try:
+        from _downloader_base import build_session as _build_session
+        session = _build_session()
+        r = session.head(pdf_url, timeout=timeout, allow_redirects=True)
+        if r.status_code == 200:
+            from _downloader_base import PDFCandidate
+            candidates.append(PDFCandidate(
+                url=pdf_url,
+                text=f"BRI Report {month_name} {year}",
+                score=100,
+                discovered_url=base_url
+            ))
+    except Exception as e:
+        LOGGER.debug(f"BRI URL verification failed: {e}")
+
+    return candidates
+
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
     parser.add_argument("--year", "--yyyy", dest="year", type=int, required=True, help="Target year")
@@ -68,7 +118,12 @@ def main():
         }])
         return 1
     
-    candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
+    # Try BRI-specific discovery first (API-based approach)
+    candidates = discover_bri_reports(html, discovered_url, args.year, args.month, args.timeout)
+
+    # Fallback: generic extraction
+    if not candidates:
+        candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
 
     # Fallback: deeper discovery if generic extraction fails
     if not candidates:
