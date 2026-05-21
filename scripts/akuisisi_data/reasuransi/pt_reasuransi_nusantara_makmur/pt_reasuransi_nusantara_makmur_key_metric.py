@@ -26,7 +26,7 @@ COLUMNS = [
 
 def extract_two_numbers(text: str, keyword: str):
     pattern = re.compile(
-        rf"{re.escape(keyword)}\s+(\(?[0-9\.,-]+\)?)\s+(\(?[0-9\.,-]+\)?)",
+        rf"{re.escape(keyword)}\s+(\(?[0-9\.,%-]+\)?)\s+(\(?[0-9\.,%-]+\)?)",
         re.IGNORECASE,
     )
     m = pattern.search(text)
@@ -43,36 +43,34 @@ def extract_two_numbers(text: str, keyword: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Extract MAREIN metrics from TXT file")
+    parser = argparse.ArgumentParser(description="Extract Nusantara Makmur metrics from TXT file")
     parser.add_argument("--yyyy", type=int, default=2026, help="Year (default: 2026)")
     parser.add_argument("--mm", type=int, default=3, help="Month (default: 3)")
     args = parser.parse_args()
 
     PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
     period_dir = PROJECT_ROOT / "data" / f"{args.yyyy}-{args.mm:02d}"
-    company_dir = period_dir / "reasuransi" / "pt_maskapai_reasuransi_indonesia"
-    INPUT_TXT = company_dir / f"pt_maskapai_reasuransi_indonesia_{args.yyyy}_{args.mm:02d}.txt"
-    COMPANY_CSV = company_dir / f"pt_maskapai_reasuransi_indonesia_key_metric_{args.yyyy}_{args.mm:02d}.csv"
+    company_dir = period_dir / "reasuransi" / "pt_reasuransi_nusantara_makmur"
+    INPUT_TXT = company_dir / f"pt_reasuransi_nusantara_makmur_{args.yyyy}_{args.mm:02d}.txt"
+    COMPANY_CSV = company_dir / f"pt_reasuransi_nusantara_makmur_key_metric_{args.yyyy}_{args.mm:02d}.csv"
     DATABASE_CSV = period_dir / f"database_reasuransi_{args.yyyy}_{args.mm:02d}.csv"
 
     text = INPUT_TXT.read_text(encoding="utf-8", errors="ignore")
     text = re.sub(r"\s+", " ", text)
 
-    company = "PT Maskapai Reasuransi Indonesia Tbk."
+    company = "PT Reasuransi Nusantara Makmur"
     jenis = "Reasuransi"
 
-    aset_2026, aset_prev = extract_two_numbers(text, "34 Jumlah Aset (20 + 33)")
-    ekuitas_2026, ekuitas_prev = extract_two_numbers(text, "20 Jumlah Ekuitas (16 s/d 19)")
+    aset_2026, aset_prev = extract_two_numbers(text, "35 Jumlah Aset (21 + 34)")
+    ekuitas_2026, ekuitas_prev = extract_two_numbers(text, "19 Jumlah Ekuitas (16 s/d 18)")
     premi_tl_2026, premi_tl_2025 = extract_two_numbers(text, "b. Premi Penutupan Tidak Langsung")
-    premi_bruto_2026, premi_bruto_2025 = extract_two_numbers(text, "4 Jumlah Premi Bruto")
+    premi_bruto_2026, premi_bruto_2025 = extract_two_numbers(text, "3 Jumlah Premi Bruto")
     pend_premi_2026, pend_premi_2025 = extract_two_numbers(text, "2 Jumlah Pendapatan Premi")
-    hasil_uw_2026, hasil_uw_2025 = extract_two_numbers(text, "17 HASIL UNDERWRITING")
-    laba_komp_2026, laba_komp_2025 = extract_two_numbers(text, "27 TOTAL LABA (RUGI) KOMPREHENSIF")
-    solv_2026, solv_prev = extract_two_numbers(text, "D. Rasio Pencapaian Solvabilitas (%) *)")
+    hasil_uw_2026, hasil_uw_2025 = extract_two_numbers(text, "16 HASIL UNDERWRITING")
+    laba_komp_2026, laba_komp_2025 = extract_two_numbers(text, "26 Total Laba (Rugi) Komprehensif")
+    solv_2026, solv_prev = extract_two_numbers(text, "D. Rasio Pencapaian (%)*")
     lik_2026, lik_prev = extract_two_numbers(text, "b. Rasio Likuiditas (%)")
 
-    # Catatan: tabel posisi keuangan & kesehatan membandingkan current vs prev year,
-    # sedangkan tabel laba rugi membandingkan current vs same month prev year.
     current_period = f"{args.yyyy}-{args.mm:02d}"
     prev_year = args.yyyy - 1
     prev_period = f"{prev_year}-{args.mm:02d}"
