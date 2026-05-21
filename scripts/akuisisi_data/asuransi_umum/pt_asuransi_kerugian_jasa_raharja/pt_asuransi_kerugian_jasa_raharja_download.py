@@ -18,6 +18,22 @@ COMPANY_ID = "pt_asuransi_kerugian_jasa_raharja"
 COMPANY_NAME = "PT Asuransi Kerugian Jasa Raharja"
 CATEGORY = "asuransi_umum"
 
+def discover_jasa_raharja_reports(html, base_url, year, month):
+    """Jasa Raharja: reports stored as images on API endpoint with YYYY-MM pattern."""
+    from _downloader_base import PDFCandidate
+    import re
+
+    candidates = []
+    # Jasa Raharja uses pattern: webjr-api.jasaraharja.co.id/report/monthly/YYYY-MM-{hash}.{ext}
+    pattern = rf'https?://[^"\s]*webjr-api\.jasaraharja\.co\.id/report/monthly/{year:04d}-{month:02d}-[^"\s]+\.(?:pdf|jpg|jpeg|png)'
+    matches = re.findall(pattern, html, re.IGNORECASE)
+
+    for url in matches:
+        text = f"Laporan Keuangan Bulan {month:02d} Tahun {year}"
+        candidates.append(PDFCandidate(url=url, text=text, score=100, discovered_url=base_url))
+
+    return candidates[:1] if candidates else []
+
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
     parser.add_argument("--year", "--yyyy", dest="year", type=int, required=True, help="Target year")
@@ -67,7 +83,7 @@ def main():
         }])
         return 1
     
-    candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
+    candidates = discover_jasa_raharja_reports(html, discovered_url, args.year, args.month)
     
     if not candidates:
         reason = "no PDF candidates found"

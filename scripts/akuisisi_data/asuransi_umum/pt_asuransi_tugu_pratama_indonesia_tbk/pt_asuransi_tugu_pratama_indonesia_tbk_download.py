@@ -20,14 +20,9 @@ COMPANY_NAME = "PT Asuransi Tugu Pratama Indonesia Tbk"
 CATEGORY = "asuransi_umum"
 
 def discover_tugu_reports(html, base_url, year, month):
-    """Tugu publishes annual reports only, not monthly."""
+    """Tugu publishes monthly financial reports."""
     candidates = extract_pdf_links(html, base_url, year, month)
-    # Filter for reports that actually mention the target year
-    annual_reports = [c for c in candidates if str(year) in c.url and '2025' not in c.text]
-    if annual_reports:
-        return annual_reports[:1]
-    # If no current year reports found, return empty
-    return []
+    return candidates[:1] if candidates else []
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")

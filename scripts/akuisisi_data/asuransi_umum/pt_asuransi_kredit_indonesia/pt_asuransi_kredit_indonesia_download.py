@@ -23,6 +23,26 @@ COMPANY_ID = "pt_asuransi_kredit_indonesia"
 COMPANY_NAME = "PT Asuransi Kredit Indonesia"
 CATEGORY = "asuransi_umum"
 
+def discover_kredit_indonesia_reports(html, base_url, year, month):
+    """Kredit Indonesia (Askrindo): reports use Pdf+LK+Publikasi+{MONTH}+{YEAR} pattern."""
+    from _downloader_base import MONTH_LABELS, PDFCandidate
+    from urllib.parse import urljoin
+    import re
+
+    candidates = []
+    month_name = MONTH_LABELS[month]
+
+    # Pattern: /documents/.../Pdf+LK+Publikasi+{MONTH}+{YEAR}_page-0001.jpg/{uuid}
+    pattern = rf'/documents/[^"\']*?Pdf\+LK\+Publikasi\+{month_name}\+{year}_page-0001\.jpg/[a-f0-9-]+\?t=\d+'
+    matches = re.findall(pattern, html, re.IGNORECASE)
+
+    for match in matches:
+        url = urljoin(base_url, match)
+        text = f"Laporan Keuangan {month_name} {year}"
+        candidates.append(PDFCandidate(url=url, text=text, score=100, discovered_url=base_url))
+
+    return candidates[:1] if candidates else []
+
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
     parser.add_argument("--year", "--yyyy", dest="year", type=int, required=True, help="Target year")
@@ -73,7 +93,7 @@ def main():
         }])
         return 1
     
-    candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
+    candidates = discover_kredit_indonesia_reports(html, discovered_url, args.year, args.month)
     
     if not candidates:
         reason = "no PDF candidates found"

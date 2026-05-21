@@ -19,7 +19,7 @@ CATEGORY = "asuransi_jiwa"
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
-    parser.add_argument("--year", type=int, required=True, help="Target year")
+    parser.add_argument("--year", type=int, help="Target year")
     parser.add_argument("--yyyy", dest="year", type=int, help="Target year (alias for --year)")
     parser.add_argument("--month", type=int, help="Target month (1-12)")
     parser.add_argument("--mm", dest="month", type=int, help="Target month 1-12 (alias for --month)")
