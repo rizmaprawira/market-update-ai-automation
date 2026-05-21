@@ -95,7 +95,7 @@ def main():
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
             "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "discovered", "reason": "discover-only mode",
+            "output_path": str(output_pdf), "status": "discover_only", "reason": "discover-only mode",
             "timestamp": current_timestamp()
         }])
         return 0

@@ -475,6 +475,55 @@ All scripts in Cohorts 2 & 3 now follow unified contract:
 
 **Applicable to:** All new script batches - standardization template works reliably when URLs are valid
 
+## 23) Site-Specific Discovery Patterns for JS-Heavy Sites (2026-05-21)
+**New patterns discovered in Cohort 3**
+
+### PT Asuransi Umum Moneeinsure (MoneeInsure)
+**Pattern:** Deterministic storage URL pattern
+- **Problem:** JS-rendered page has no PDF links visible in static HTML
+- **Solution:** Generate candidate URL using predictable pattern
+  ```python
+  # Pattern: /static/home/2/laporankeuangan<MONTHNAME><YEAR2DIGIT>.pdf
+  # Example: laporankeuanganapr26.pdf
+  url = f"https://moneeinsure.co.id/static/home/2/laporankeuangan{month_lower}{year_2digit}.pdf"
+  # Validate via HEAD request before attempting download
+  ```
+- **Implementation approach:**
+  1. Try generic extraction first
+  2. If no candidates, attempt deterministic pattern URL
+  3. Validate with HEAD request (no full download needed for check)
+  4. Return if accessible, else not_found
+
+### PT Asuransi Untuk Semua (Tap Insure) ✓ WORKING
+**Pattern:** Browser-rendered discovery + S3 storage
+- **Solution:** Generic extraction + browser fallback works perfectly
+  - Page requires Playwright to render
+  - "Unduh" button appears after JS execution
+  - Links point to AWS S3 cloudfront
+  - **Test result (2026-03):** Successfully downloaded 283KB
+- **Key:** Browser rendering fallback in `fetch_html_with_smart_fallback()` handles this automatically
+- **No site-specific code needed** - template approach works
+
+### PT Avrist General Insurance
+**Pattern:** Interactive tab selection + API endpoints
+- **Problem:** 
+  - Main page has no direct PDF links
+  - PDFs behind "Laporan Perusahaan" tab (requires JS click)
+  - Individual files have stable API URLs with file IDs
+  - Example: `/api-cms/files/get/8a25d3f0-6a9e-4e3b-9dd2-d5582ad0165a-3.Web%20Published-Lap%20Keu%20April%202026-Conventional.pdf`
+- **Recommended solution:**
+  1. Tab URL already targets correct tab: `?tab=Laporan+Perusahaan`
+  2. Browser rendering should load content - need to investigate why not discovering links
+  3. Alternative: Hardcode file ID list per period if pattern is stable
+  4. Or: Implement tab-click fallback in Playwright
+
+**Lesson:** Some sites work automatically with browser rendering (Tap Insure), others need either:
+- Deterministic URL patterns (Moneeinsure)
+- Tab/button click automation (Avrist)
+- API direct access
+
+Mark priority for future work: Moneeinsure (simple pattern), then Avrist (tab automation)
+
 ## 23) Standardization Testing: New 10-Script Cohort (2026-05-21)
 **Pattern confirmed with fresh cohort (AXA, Bosowa, BRI, China Taiping, Chubb, Citra, Great Eastern, Kookmin, Lippo, Malacca)**
 

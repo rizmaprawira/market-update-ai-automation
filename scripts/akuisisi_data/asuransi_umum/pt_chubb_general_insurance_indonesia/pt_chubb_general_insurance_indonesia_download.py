@@ -2,7 +2,6 @@
 import argparse
 import logging
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -17,6 +16,17 @@ SOURCE_URL = "https://www.chubb.com/id-id/about-chubb/laporan-keuangan-chubb-ind
 COMPANY_ID = "pt_chubb_general_insurance_indonesia"
 COMPANY_NAME = "PT Chubb General Insurance Indonesia"
 CATEGORY = "asuransi_umum"
+
+def discover_chubb_reports(html, base_url, year, month, timeout=30):
+    """Site-specific discovery: prioritize exact month match."""
+    candidates = extract_pdf_links(html, base_url, year, month)
+    if not candidates:
+        return []
+    month_names = ["januari", "februari", "maret", "april", "mei", "juni",
+                   "juli", "agustus", "september", "oktober", "november", "desember"]
+    target_month = month_names[month - 1]
+    exact = [c for c in candidates if target_month in c.url.lower() and str(year) in c.url]
+    return exact if exact else candidates
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
@@ -67,7 +77,7 @@ def main():
         }])
         return 1
     
-    candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
+    candidates = discover_chubb_reports(html, discovered_url, args.year, args.month, args.timeout)
     
     if not candidates:
         reason = "no PDF candidates found"

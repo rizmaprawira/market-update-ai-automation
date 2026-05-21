@@ -2,14 +2,16 @@
 import argparse
 import logging
 import sys
-import time
+import re
 from pathlib import Path
+from urllib.parse import urljoin
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from _downloader_base import (
     build_session, extract_pdf_links, download_pdf, write_manifest, write_debug_html,
-    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp
+    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp,
+    PDFCandidate, MONTH_LABELS
 )
 
 LOGGER = logging.getLogger("download_pt_lippo_general_insurance_tbk")
@@ -17,6 +19,27 @@ SOURCE_URL = "https://www.lgi.co.id/tentang-kami/laporan-keuangan/"
 COMPANY_ID = "pt_lippo_general_insurance_tbk"
 COMPANY_NAME = "PT Lippo General Insurance Tbk."
 CATEGORY = "asuransi_umum"
+
+def discover_lippo_reports(html, base_url, year, month, timeout=30):
+    """Site-specific discovery for Lippo: prioritize exact month match."""
+    candidates = extract_pdf_links(html, base_url, year, month)
+    if not candidates:
+        return []
+
+    target_month = MONTH_LABELS.get(month, "").lower()
+    month_indo = ["januari", "februari", "maret", "april", "mei", "juni",
+                  "juli", "agustus", "september", "oktober", "november", "desember"][month - 1]
+
+    # Filter for exact month match
+    exact_matches = []
+    for cand in candidates:
+        url_lower = cand.url.lower()
+        text_lower = cand.text.lower()
+        if month_indo in url_lower or target_month in url_lower or \
+           month_indo in text_lower or target_month in text_lower:
+            exact_matches.append(cand)
+
+    return exact_matches if exact_matches else candidates
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
@@ -67,7 +90,7 @@ def main():
         }])
         return 1
     
-    candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
+    candidates = discover_lippo_reports(html, discovered_url, args.year, args.month, args.timeout)
     
     if not candidates:
         reason = "no PDF candidates found"

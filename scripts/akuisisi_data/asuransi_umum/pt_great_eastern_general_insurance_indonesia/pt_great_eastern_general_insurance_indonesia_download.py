@@ -2,7 +2,6 @@
 import argparse
 import logging
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -17,6 +16,17 @@ SOURCE_URL = "https://www.greateasterngeneral.com/id/in/pusat-media/informasi-ke
 COMPANY_ID = "pt_great_eastern_general_insurance_indonesia"
 COMPANY_NAME = "PT Great Eastern General Insurance Indonesia"
 CATEGORY = "asuransi_umum"
+
+def discover_ge_reports(html, base_url, year, month, timeout=30):
+    """Site-specific discovery: prioritize exact month match."""
+    candidates = extract_pdf_links(html, base_url, year, month)
+    if not candidates:
+        return []
+    month_names = ["jan", "feb", "mar", "apr", "may", "jun",
+                   "jul", "aug", "sep", "oct", "nov", "dec"]
+    target_abbr = month_names[month - 1]
+    exact = [c for c in candidates if f"{target_abbr}-{year}" in c.url.lower()]
+    return exact if exact else candidates
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
@@ -67,7 +77,7 @@ def main():
         }])
         return 1
     
-    candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
+    candidates = discover_ge_reports(html, discovered_url, args.year, args.month, args.timeout)
     
     if not candidates:
         reason = "no PDF candidates found"
