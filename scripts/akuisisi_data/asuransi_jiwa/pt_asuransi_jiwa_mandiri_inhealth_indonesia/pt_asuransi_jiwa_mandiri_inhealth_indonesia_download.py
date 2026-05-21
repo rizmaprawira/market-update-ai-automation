@@ -1,9 +1,10 @@
-"""Download financial reports for PT Asuransi Allianz Utama Indonesia."""
+"""Download financial reports for PT Asuransi Jiwa Mandiri Inhealth Indonesia."""
 import argparse
 import logging
 import sys
-import time
+import re
 from pathlib import Path
+from calendar import month_name
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _downloader_base import (
@@ -11,11 +12,78 @@ from _downloader_base import (
     fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp
 )
 
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:
+    sync_playwright = None
+
 LOGGER = logging.getLogger("download_pt_asuransi_jiwa_mandiri_inhealth_indonesia")
 SOURCE_URL = "https://www.inhealth.co.id/id/gcg"
 COMPANY_ID = "pt_asuransi_jiwa_mandiri_inhealth_indonesia"
 COMPANY_NAME = "PT Asuransi Jiwa Mandiri Inhealth Indonesia"
 CATEGORY = "asuransi_jiwa"
+
+def fetch_mandiri_inhealth_pdfs(year, month, timeout=30):
+    """Fetch Mandiri InHealth PDFs using Playwright dropdown selection."""
+    if sync_playwright is None:
+        raise RuntimeError("Playwright not installed; pip install playwright && playwright install chromium")
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+
+        try:
+            page.goto(SOURCE_URL, wait_until="networkidle", timeout=timeout * 1000)
+
+            # Close banner popup
+            close_btn = page.query_selector("button[aria-label*='close' i]")
+            if close_btn:
+                LOGGER.info("Closing popup banner")
+                close_btn.click(force=True)
+                page.wait_for_timeout(500)
+
+            # Click first dropdown to see monthly reports
+            dropdown = page.query_selector("[role='combobox']")
+            if dropdown:
+                LOGGER.info("Opening dropdown for month selection")
+                dropdown.click()
+                page.wait_for_timeout(1000)
+
+                # Find the option for the target month
+                month_name_id = month_name[month].lower()
+                target_month_indo = {
+                    'january': 'januari', 'february': 'februari', 'march': 'maret',
+                    'april': 'april', 'may': 'mei', 'june': 'juni',
+                    'july': 'juli', 'august': 'agustus', 'september': 'september',
+                    'october': 'oktober', 'november': 'november', 'december': 'desember'
+                }.get(month_name_id, month_name_id)
+
+                # Look for option matching the month and year
+                options = page.query_selector_all("[role='option']")
+                LOGGER.info(f"Found {len(options)} options in dropdown")
+
+                selected_option = None
+                for opt in options:
+                    opt_text = opt.text_content().strip().lower()
+                    if str(year) in opt_text and target_month_indo in opt_text:
+                        selected_option = opt
+                        LOGGER.info(f"Found matching option: {opt.text_content().strip()}")
+                        break
+
+                if selected_option:
+                    selected_option.click()
+                    page.wait_for_timeout(2000)
+
+            # Extract PDF URLs from page
+            content = page.content()
+            pdf_urls = re.findall(r'https://[^\s"<>]+\.pdf', content)
+            matching_pdfs = [url for url in pdf_urls if str(year) in url]
+
+            LOGGER.info(f"Found {len(matching_pdfs)} PDFs for {year}")
+            return content, SOURCE_URL, matching_pdfs if matching_pdfs else pdf_urls
+
+        finally:
+            browser.close()
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
@@ -45,15 +113,21 @@ def main():
     debug_dir = output_dir / "_debug_html"
     
     LOGGER.info(f"Fetching from {SOURCE_URL}")
-    
+
     try:
-        if args.use_browser:
-            LOGGER.info("Using Playwright browser rendering")
-            html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
+        # Use Playwright to handle popup and dropdown interaction
+        LOGGER.info("Using Playwright with popup close + dropdown selection")
+        html, discovered_url, pdf_urls = fetch_mandiri_inhealth_pdfs(args.year, args.month, args.timeout)
+
+        # Create candidate objects from extracted URLs
+        if pdf_urls:
+            class Candidate:
+                def __init__(self, url):
+                    self.url = url
+                    self.text = "PDF (extracted)"
+            candidates = [Candidate(pdf_urls[0])]
         else:
-            html, discovered_url, used_browser = fetch_html_with_smart_fallback(
-                session, SOURCE_URL, args.year, args.month, args.timeout
-            )
+            candidates = []
     except Exception as e:
         reason = f"failed to fetch: {e}"
         LOGGER.error(reason)
@@ -67,8 +141,6 @@ def main():
             "timestamp": current_timestamp()
         }])
         return 1
-    
-    candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
     
     if not candidates:
         reason = "no PDF candidates found"
