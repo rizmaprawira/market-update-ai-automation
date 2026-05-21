@@ -45,9 +45,11 @@ def main():
     args = parser.parse_args()
 
     PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-    company_dir = PROJECT_ROOT / "data" / f"{args.yyyy}-{args.mm:02d}" / "pt_maskapai_reasuransi_indonesia"
-    INPUT_TXT = company_dir / "pt_maskapai_reasuransi_indonesia_pdf.txt"
-    OUTPUT_CSV = company_dir / "pt_maskapai_reasuransi_indonesia_row.csv"
+    period_dir = PROJECT_ROOT / "data" / f"{args.yyyy}-{args.mm:02d}"
+    company_dir = period_dir / "pt_maskapai_reasuransi_indonesia"
+    INPUT_TXT = company_dir / f"pt_maskapai_reasuransi_indonesia_{args.yyyy}_{args.mm:02d}.txt"
+    COMPANY_CSV = company_dir / f"pt_maskapai_reasuransi_indonesia_key_metric_{args.yyyy}_{args.mm:02d}.csv"
+    DATABASE_CSV = period_dir / f"database_reasuransi_{args.yyyy}_{args.mm:02d}.csv"
 
     text = INPUT_TXT.read_text(encoding="utf-8", errors="ignore")
     text = re.sub(r"\s+", " ", text)
@@ -101,12 +103,21 @@ def main():
         },
     ]
 
-    with OUTPUT_CSV.open("w", newline="", encoding="utf-8") as f:
+    with COMPANY_CSV.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=COLUMNS, delimiter="|")
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"Wrote {OUTPUT_CSV}")
+    db_exists = DATABASE_CSV.exists()
+    db_mode = "a" if db_exists else "w"
+    with DATABASE_CSV.open(db_mode, newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=COLUMNS, delimiter="|")
+        if not db_exists:
+            writer.writeheader()
+        writer.writerows(rows)
+
+    print(f"Wrote {COMPANY_CSV}")
+    print(f"Appended to {DATABASE_CSV}" if db_exists else f"Created {DATABASE_CSV}")
 
 
 if __name__ == "__main__":
