@@ -21,8 +21,8 @@ def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
     parser.add_argument("--year", type=int, required=True, help="Target year")
     parser.add_argument("--yyyy", dest="year", type=int, help="Target year (alias for --year)")
-    parser.add_argument("--month", type=int, required=True, help="Target month (1-12)
-    parser.add_argument("--mm", dest="month", type=int, help="Target month 1-12 (alias for --month)")")
+    parser.add_argument("--month", type=int, help="Target month (1-12)")
+    parser.add_argument("--mm", dest="month", type=int, help="Target month 1-12 (alias for --month)")
     parser.add_argument("--output-root", type=Path, default=Path("data"))
     parser.add_argument("--dry-run", action="store_true", help="Discovery only, no download")
     parser.add_argument("--discover-only", action="store_true", help="Stop after discovery, return 0")
@@ -63,7 +63,7 @@ def main():
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": SOURCE_URL,
             "pdf_url": "", "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "failed", "reason": reason,
+            "output_path": str(output_pdf), "status": "error", "reason": reason,
             "timestamp": current_timestamp()
         }])
         return 1
@@ -79,14 +79,25 @@ def main():
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
             "pdf_url": "", "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "no_pdf_found", "reason": reason,
+            "output_path": str(output_pdf), "status": "not_found", "reason": reason,
             "timestamp": current_timestamp()
         }])
-        return 0
+        return 1
     
     selected_candidate = candidates[0]
     LOGGER.info(f"Selected: {selected_candidate.text[:60]}")
     
+    if args.discover_only:
+        LOGGER.info("Discover-only mode: stopping after discovery")
+        write_manifest(output_dir, [{
+            "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
+            "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
+            "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+            "output_path": str(output_pdf), "status": "discover_only", "reason": "discover-only mode",
+            "timestamp": current_timestamp()
+        }])
+        return 0
+
     if args.dry_run:
         LOGGER.info(f"Dry-run: would download from {selected_candidate.url}")
         write_manifest(output_dir, [{
@@ -104,20 +115,20 @@ def main():
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
             "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "already_exists", "reason": "file exists",
+            "output_path": str(output_pdf), "status": "skipped_existing", "reason": "file exists",
             "timestamp": current_timestamp()
         }])
         return 0
     
-    success, reason = download_pdf(
-        session, selected_candidate.url, output_pdf, timeout=args.timeout
+    http_status, file_size = download_pdf(
+        session, selected_candidate.url, output_pdf, timeout=args.timeout, force=args.force
     )
     
     write_manifest(output_dir, [{
         "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
         "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
         "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
-        "output_path": str(output_pdf), "status": "success" if success else "failed",
+        "output_path": str(output_pdf), "status": "downloaded" if success else "failed",
         "reason": reason, "timestamp": current_timestamp()
     }])
     
