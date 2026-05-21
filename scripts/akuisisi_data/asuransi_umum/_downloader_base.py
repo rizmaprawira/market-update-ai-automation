@@ -301,6 +301,21 @@ def validate_pdf(data):
         return False
     return b"%%EOF" in data[-2048:] if len(data) > 2048 else True
 
+def validate_document(data):
+    """Validate PDF, JPEG, PNG, and other document formats."""
+    if len(data) < 4:
+        return False
+    # PDF: starts with %PDF-
+    if data.startswith(b"%PDF-"):
+        return b"%%EOF" in data[-2048:] if len(data) > 2048 else True
+    # JPEG: starts with FFD8FF
+    if data.startswith(b"\xFF\xD8\xFF"):
+        return True
+    # PNG: starts with 89504E47
+    if data.startswith(b"\x89PNG"):
+        return True
+    return False
+
 def fetch_html_static(session, url, timeout):
     response = session.get(url, timeout=timeout)
     response.raise_for_status()
@@ -385,14 +400,15 @@ def fetch_html_with_smart_fallback(session, url, year, month, timeout=30):
 
 def download_pdf(session, url, output_path, timeout=30, force=False):
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     if output_path.exists() and not force:
         existing = output_path.read_bytes()
-        if validate_pdf(existing):
+        if validate_document(existing):
             return None, len(existing)
-    
-    def _download_stream(verify=True):
-        with session.get(url, timeout=timeout, stream=True, verify=verify) as response:
+
+    def _download_stream(verify=True, headers=None):
+        request_headers = headers or {}
+        with session.get(url, timeout=timeout, stream=True, verify=verify, headers=request_headers) as response:
             status_code = response.status_code
             response.raise_for_status()
             with tempfile.NamedTemporaryFile(delete=False, dir=str(output_path.parent), suffix=".part") as tmp:
@@ -405,21 +421,29 @@ def download_pdf(session, url, output_path, timeout=30, force=False):
 
     try:
         status, temp_path = _download_stream(verify=True)
-    except RequestsSSLError as e:
+    except (RequestsSSLError, Exception) as e:
         message = str(e)
-        if "CERTIFICATE_VERIFY_FAILED" not in message and "SSLCertVerificationError" not in message:
+        # Retry with verify=False for SSL errors
+        if "CERTIFICATE_VERIFY_FAILED" in message or "SSLCertVerificationError" in message:
+            LOGGER.warning(
+                "SSL certificate verification failed for %s; retrying with verify=False",
+                url,
+            )
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            status, temp_path = _download_stream(verify=False)
+        # Retry with Referer header for 403 Forbidden
+        elif "403" in message:
+            LOGGER.warning("Got 403 Forbidden; retrying with Referer header")
+            domain = url.split('/')[2] if '//' in url else ''
+            referer = f"https://{domain}/" if domain else "https://www.google.com/"
+            status, temp_path = _download_stream(verify=True, headers={"Referer": referer})
+        else:
             raise
-        LOGGER.warning(
-            "SSL certificate verification failed for %s; retrying with verify=False",
-            url,
-        )
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        status, temp_path = _download_stream(verify=False)
     
     data = temp_path.read_bytes()
-    if not validate_pdf(data):
+    if not validate_document(data):
         temp_path.unlink()
-        raise RuntimeError(f"Invalid PDF from {url}")
+        raise RuntimeError(f"Invalid document from {url}")
     
     temp_path.replace(output_path)
     return status, len(data)
