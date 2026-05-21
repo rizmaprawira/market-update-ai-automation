@@ -13,7 +13,7 @@ from _downloader_base import (
 )
 
 LOGGER = logging.getLogger("download_pt_asuransi_umum_bca")
-SOURCE_URL = "https://www.asuransibca.co.id/laporan-keuangan"
+SOURCE_URL = "https://www.bcainsurance.co.id/laporan-keuangan"
 COMPANY_ID = "pt_asuransi_umum_bca"
 COMPANY_NAME = "PT Asuransi Umum BCA"
 CATEGORY = "asuransi_umum"
