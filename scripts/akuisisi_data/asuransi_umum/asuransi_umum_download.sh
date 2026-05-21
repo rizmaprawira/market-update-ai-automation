@@ -54,6 +54,7 @@ FLAG_USE_BROWSER=false
 FLAG_DEBUG_HTML=false
 
 LOG_FILE=""
+FAIL_LOG=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -150,8 +151,12 @@ PERIODE="${TAHUN}-${BULAN}"
 PERIOD_DIR="${OUTPUT_ROOT}/${PERIODE}"
 mkdir -p "$PERIOD_DIR"
 
-LOG_FILE="${PERIOD_DIR}/asuransi_umum_log.txt"
+LOG_FILE="${PERIOD_DIR}/asuransi_umum_download_log.txt"
+FAIL_LOG="${PERIOD_DIR}/asuransi_umum_faildownload_log.txt"
 MAIN_SUMMARY="${PERIOD_DIR}/asuransi_umum_summary.md"
+
+# Initialize fail log
+> "$FAIL_LOG"
 
 log "INFO" "======================================================================"
 log "INFO" "Start Akuisisi Data Asuransi Umum | period=${PERIODE}"
@@ -159,6 +164,7 @@ log "INFO" "====================================================================
 
 DOWNLOAD_SUCCESS=0
 DOWNLOAD_FAIL=0
+FAILED_COMPANIES=()
 
 # ============================================================================
 # PHASE 1: DOWNLOAD PDFs
@@ -249,6 +255,8 @@ for script_name in "${COMPANY_SCRIPTS[@]}"; do
 
   if [[ ! -f "$script_path" ]]; then
     log "ERROR" "[$INDEX/$TOTAL_COUNT] ${script_name} -> FAIL (script_not_found)"
+    FAILED_COMPANIES+=("${company_snake} - script_not_found")
+    echo "[$INDEX/$TOTAL_COUNT] ${company_snake} - script_not_found" >> "$FAIL_LOG"
     DOWNLOAD_FAIL=$((DOWNLOAD_FAIL + 1))
     if [[ "$MODE_FAIL_FAST" == "true" ]]; then
       break
@@ -293,6 +301,8 @@ for script_name in "${COMPANY_SCRIPTS[@]}"; do
       DOWNLOAD_SUCCESS=$((DOWNLOAD_SUCCESS + 1))
     else
       log "ERROR" "[$INDEX/$TOTAL_COUNT] ${company_snake} -> FAIL (non_download_mode_failed)"
+      FAILED_COMPANIES+=("${company_snake} - discovery_failed")
+      echo "[$INDEX/$TOTAL_COUNT] ${company_snake} - discovery_failed" >> "$FAIL_LOG"
       DOWNLOAD_FAIL=$((DOWNLOAD_FAIL + 1))
       if [[ "$MODE_FAIL_FAST" == "true" ]]; then
         break
@@ -304,6 +314,8 @@ for script_name in "${COMPANY_SCRIPTS[@]}"; do
       DOWNLOAD_SUCCESS=$((DOWNLOAD_SUCCESS + 1))
     else
       log "ERROR" "[$INDEX/$TOTAL_COUNT] ${company_snake} -> FAIL (pdf_download_failed)"
+      FAILED_COMPANIES+=("${company_snake} - download_failed")
+      echo "[$INDEX/$TOTAL_COUNT] ${company_snake} - download_failed" >> "$FAIL_LOG"
       DOWNLOAD_FAIL=$((DOWNLOAD_FAIL + 1))
       if [[ "$MODE_FAIL_FAST" == "true" ]]; then
         break
@@ -333,13 +345,23 @@ log "INFO" "====================================================================
   echo "- Success: ${DOWNLOAD_SUCCESS}"
   echo "- Fail: ${DOWNLOAD_FAIL}"
   echo "- Total: $TOTAL_COUNT"
+  echo "- Success Rate: $((DOWNLOAD_SUCCESS * 100 / TOTAL_COUNT))%"
   echo ""
   echo "## Details"
   echo "- Period: ${PERIODE}"
   echo "- Output Root: ${OUTPUT_ROOT}"
   echo "- Resume Mode: ${MODE_RESUME}"
-  echo "- Log File: ${LOG_FILE}"
+  echo "- Download Log: ${LOG_FILE}"
+  echo "- Fail Log: ${FAIL_LOG}"
   echo "- Timestamp: $(date)"
+  echo ""
+
+  if [[ ${#FAILED_COMPANIES[@]} -gt 0 ]]; then
+    echo "## Failed Companies (${#FAILED_COMPANIES[@]})"
+    for company in "${FAILED_COMPANIES[@]}"; do
+      echo "- $company"
+    done
+  fi
 } > "$MAIN_SUMMARY"
 
 cat "$MAIN_SUMMARY"
