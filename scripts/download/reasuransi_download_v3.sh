@@ -5,11 +5,11 @@ set -o pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  ./scripts/download/reasuransi_download_v3.sh --YYYY 2026 --MM 04 [options]
+  ./scripts/download/reasuransi_download_v3.sh --yyyy 2026 --mm 04 [options]
 
 Required:
-  --YYYY <year>                  4-digit year (e.g. 2026)
-  --MM <month>                   2-digit month (01..12)
+  --yyyy <year>                  4-digit year (e.g. 2026)
+  --mm <month>                   2-digit month (01..12)
 
 Optional:
   --output-root <dir>            Output root (default: data)
@@ -58,11 +58,11 @@ LOG_FILE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --YYYY)
+    --yyyy)
       TAHUN="${2:-}"
       shift 2
       ;;
-    --MM)
+    --mm)
       BULAN="${2:-}"
       shift 2
       ;;
@@ -127,18 +127,18 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$TAHUN" || -z "$BULAN" ]]; then
-  echo "Error: --YYYY and --MM are required."
+  echo "Error: --yyyy and --mm are required."
   usage
   exit 1
 fi
 
 if [[ ! "$TAHUN" =~ ^[0-9]{4}$ ]]; then
-  echo "Error: --YYYY must be 4 digits."
+  echo "Error: --yyyy must be 4 digits."
   exit 1
 fi
 
 if [[ ! "$BULAN" =~ ^(0[1-9]|1[0-2])$ ]]; then
-  echo "Error: --MM must be 01..12."
+  echo "Error: --mm must be 01..12."
   exit 1
 fi
 
@@ -221,7 +221,7 @@ for script_name in "${COMPANY_SCRIPTS[@]}"; do
 
   company_snake="${script_name%_download.py}"
   company_dir="${PERIOD_DIR}/${company_snake}"
-  pdf_path="${company_dir}/${company_snake}_pdf.pdf"
+  pdf_path="${company_dir}/${company_snake}_${TAHUN}_${BULAN}.pdf"
 
   if [[ "$MODE_RESUME" == "true" && -f "$pdf_path" && "$FLAG_FORCE" == "false" ]]; then
     SKIP_COUNT=$((SKIP_COUNT + 1))

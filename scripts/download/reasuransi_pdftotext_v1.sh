@@ -5,11 +5,11 @@ set -o pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  ./scripts/download/reasuransi_pdftotext_v1.sh --YYYY 2026 --MM 04 [options]
+  ./scripts/download/reasuransi_pdftotext_v1.sh --yyyy 2026 --mm 04 [options]
 
 Required:
-  --YYYY <year>                  4-digit year (e.g. 2026)
-  --MM <month>                   2-digit month (01..12)
+  --yyyy <year>                  4-digit year (e.g. 2026)
+  --mm <month>                   2-digit month (01..12)
 
 Optional:
   --output-root <dir>            Output root (default: data)
@@ -40,11 +40,11 @@ LOG_FILE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --YYYY)
+    --yyyy)
       TAHUN="${2:-}"
       shift 2
       ;;
-    --MM)
+    --mm)
       BULAN="${2:-}"
       shift 2
       ;;
@@ -73,18 +73,18 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$TAHUN" || -z "$BULAN" ]]; then
-  echo "Error: --YYYY and --MM are required."
+  echo "Error: --yyyy and --mm are required."
   usage
   exit 1
 fi
 
 if [[ ! "$TAHUN" =~ ^[0-9]{4}$ ]]; then
-  echo "Error: --YYYY must be 4 digits."
+  echo "Error: --yyyy must be 4 digits."
   exit 1
 fi
 
 if [[ ! "$BULAN" =~ ^(0[1-9]|1[0-2])$ ]]; then
-  echo "Error: --MM must be 01..12."
+  echo "Error: --mm must be 01..12."
   exit 1
 fi
 
@@ -95,6 +95,11 @@ fi
 
 if ! command -v pdftotext >/dev/null 2>&1; then
   echo "Error: pdftotext command not found."
+  exit 1
+fi
+
+if ! command -v ocrmypdf >/dev/null 2>&1; then
+  echo "Error: ocrmypdf command not found (required for maipark OCR)."
   exit 1
 fi
 
@@ -118,10 +123,10 @@ echo "pdf,txt,status,reason,exit_code,duration_sec" > "$SUMMARY_CSV"
 
 log "INFO" "Start pdftotext | period=${PERIODE} | output_root=${OUTPUT_ROOT} | resume=${MODE_RESUME} | dry_run=${MODE_DRY_RUN}"
 
-TOTAL_COUNT=$(find "$PERIOD_DIR" -name "*_pdf.pdf" | wc -l)
+TOTAL_COUNT=$(find "$PERIOD_DIR" -regex ".*_[0-9]\{4\}_[0-9]\{2\}\.pdf" | wc -l)
 
 if [[ "$TOTAL_COUNT" -eq 0 ]]; then
-  log "INFO" "No *_pdf.pdf files found in $PERIOD_DIR"
+  log "INFO" "No PDF files (format: *_YYYY_MM.pdf) found in $PERIOD_DIR"
   echo "# PDFtoText Summary ${PERIODE}" > "${PERIOD_DIR}/pdftotext_summary.md"
   echo "" >> "${PERIOD_DIR}/pdftotext_summary.md"
   echo "- Period: ${PERIODE}" >> "${PERIOD_DIR}/pdftotext_summary.md"
@@ -149,7 +154,17 @@ while IFS= read -r pdf_path; do
   fi
 
   if [[ "$MODE_DRY_RUN" == "true" ]]; then
-    log "INFO" "[$INDEX/$TOTAL_COUNT] [DRY-RUN] pdftotext -layout \"${pdf_path}\" \"${txt_path}\""
+    is_maipark=false
+    if [[ "$pdf_basename" == *"maipark"* ]]; then
+      is_maipark=true
+    fi
+    if [[ "$is_maipark" == "true" ]]; then
+      ocr_pdf="${pdf_dir}/${pdf_basename%.pdf}_ocr.pdf"
+      log "INFO" "[$INDEX/$TOTAL_COUNT] [DRY-RUN] ocrmypdf --deskew --clean --oversample 400 --tesseract-pagesegmode 1 \"${pdf_path}\" \"${ocr_pdf}\""
+      log "INFO" "[$INDEX/$TOTAL_COUNT] [DRY-RUN] pdftotext -layout \"${ocr_pdf}\" \"${txt_path}\""
+    else
+      log "INFO" "[$INDEX/$TOTAL_COUNT] [DRY-RUN] pdftotext -layout \"${pdf_path}\" \"${txt_path}\""
+    fi
     SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
     printf '%s\n' "${pdf_path},${txt_path},SUCCESS,dry_run_ok,0,0" >> "$SUMMARY_CSV"
     continue
@@ -158,10 +173,39 @@ while IFS= read -r pdf_path; do
   start_epoch="$(date +%s)"
 
   log "INFO" "[$INDEX/$TOTAL_COUNT] RUN ${pdf_basename}"
-  if pdftotext -layout "$pdf_path" "$txt_path" >> "$LOG_FILE" 2>&1; then
-    exit_code=0
+
+  is_maipark=false
+  if [[ "$pdf_basename" == *"maipark"* ]]; then
+    is_maipark=true
+  fi
+
+  exit_code=0
+  if [[ "$is_maipark" == "true" ]]; then
+    ocr_pdf="${pdf_dir}/${pdf_basename%.pdf}_ocr.pdf"
+    log "INFO" "[$INDEX/$TOTAL_COUNT] Running OCR for maipark: ocrmypdf"
+    mkdir -p "$HOME/ocrmypdf_tmp"
+    if TMPDIR="$HOME/ocrmypdf_tmp" ocrmypdf --deskew --clean --oversample 400 --tesseract-pagesegmode 1 "$(cd "$(dirname "$pdf_path")" && pwd)/$(basename "$pdf_path")" "$ocr_pdf" >> "$LOG_FILE" 2>&1; then
+      log "INFO" "[$INDEX/$TOTAL_COUNT] OCR completed, running pdftotext on OCR'd PDF"
+      if pdftotext -layout "$ocr_pdf" "$txt_path" >> "$LOG_FILE" 2>&1; then
+        exit_code=0
+      else
+        exit_code=$?
+      fi
+    else
+      exit_code=$?
+      log "WARN" "[$INDEX/$TOTAL_COUNT] OCR failed, will try pdftotext on original PDF"
+      if pdftotext -layout "$pdf_path" "$txt_path" >> "$LOG_FILE" 2>&1; then
+        exit_code=0
+      else
+        exit_code=$?
+      fi
+    fi
   else
-    exit_code=$?
+    if pdftotext -layout "$pdf_path" "$txt_path" >> "$LOG_FILE" 2>&1; then
+      exit_code=0
+    else
+      exit_code=$?
+    fi
   fi
 
   end_epoch="$(date +%s)"
@@ -179,7 +223,7 @@ while IFS= read -r pdf_path; do
 
   log "INFO" "[$INDEX/${TOTAL_COUNT}] ${pdf_basename} -> ${status} (${reason})"
   printf '%s\n' "${pdf_path},${txt_path},${status},${reason},${exit_code},${duration_sec}" >> "$SUMMARY_CSV"
-done < <(find "$PERIOD_DIR" -name "*_pdf.pdf" | sort)
+done < <(find "$PERIOD_DIR" -regex ".*_[0-9]\{4\}_[0-9]\{2\}\.pdf" | sort)
 
 {
   echo "# PDFtoText Summary ${PERIODE}"
