@@ -833,3 +833,95 @@ All 3 scripts updated:
 **Lines Changed:** ~150 total across 3 files
 **Production Impact:** 0 (previously failing, now working)
 
+## 26) Fallback URL Discovery Strategy (2026-05-21)
+
+**Problem:** 7 scripts were failing discovery because:
+- Wrong primary URLs (user provided different domains that worked)
+- When primary URL failed, scripts returned error immediately
+- No fallback mechanism to try alternative URLs
+
+**Root Cause:** 
+Scripts had hardcoded incorrect company domains/URLs that were stale:
+- Bumida: `bumiputeramuda.com` → correct: `bumida.co.id`
+- Mega: `asuransimega.com` → correct: `megainsurance.co.id`
+- Videi: `videiinsurance.com` → correct: `videi-insurance.co.id`
+- Wahana Tata: `wahanatata.co.id` → correct: `aswata.co.id`
+- Chubb, KB, Zurich: Already had correct URLs, just needed fallback pattern for safety
+
+**Solution Applied:**
+
+1. **Add FALLBACK_URL constant** to all 7 scripts with corrected domain
+   ```python
+   SOURCE_URL = "https://www.bumiputeramuda.com/laporan-keuangan"  # old/wrong
+   FALLBACK_URL = "https://www.bumida.co.id/laporan-triwulan-konvensional.html"  # correct
+   ```
+
+2. **Restructure fetch error handling** to allow fallback:
+   ```python
+   # OLD: Exception on primary fetch → return error immediately
+   try:
+       html, discovered_url = fetch_html_with_smart_fallback(SOURCE_URL, ...)
+   except Exception as e:
+       return 1  # No fallback attempted
+   
+   # NEW: Exception on primary → try fallback before giving up
+   fetch_error = None
+   try:
+       html, discovered_url = fetch_html_with_smart_fallback(SOURCE_URL, ...)
+   except Exception as e:
+       fetch_error = str(e)
+       if SOURCE_URL != FALLBACK_URL:
+           try:
+               html, discovered_url = fetch_html_with_smart_fallback(FALLBACK_URL, ...)
+               fetch_error = None  # Fallback succeeded
+           except Exception as e2:
+               fetch_error = str(e2)  # Both failed
+   
+   if fetch_error:
+       return 1  # Only return error if BOTH failed
+   ```
+
+3. **Add site-specific period matching for Zurich:**
+   ```python
+   def discover_zurich_reports(html, base_url, year, month, timeout=30):
+       """Prioritize exact month match to avoid returning wrong-month PDFs."""
+       candidates = extract_pdf_links(html, base_url, year, month)
+       if not candidates:
+           return []
+       target_month = MONTH_LABELS[month].lower()
+       # Prefer candidates that mention target month + target year
+       exact = [c for c in candidates if target_month in c.text.lower() and str(year) in c.text]
+       return exact if exact else candidates
+   ```
+
+**Test Results (2026-03):**
+- ✓ **Bumida**: Primary failed (DNS) → Fallback succeeded → Found PDF
+- ✓ **Mega**: Primary failed (DNS) → Fallback succeeded → Found PDF
+- ✓ **Videi**: Primary failed (DNS) → Fallback succeeded → Found PDF
+- ✓ **Wahana Tata**: Primary failed (DNS) → Fallback succeeded → Found PDF
+- ✓ **Chubb**: Primary succeeded → Found "Laporan Keuangan Bulan Maret - 2026" (correct month)
+- ✓ **Kookmin (KB)**: Primary succeeded → Found Q1 2026 (correct period)
+- ✓ **Zurich**: Period matching fixed → Found "Laporan Keuangan Maret 2026" (was incorrectly finding January before)
+
+**Key Learning:**
+When company URLs change/are stale, don't force one-to-one migration. Instead:
+1. Keep primary URL for historical consistency
+2. Add FALLBACK_URL for new/current domain
+3. Implement graceful fallback in error handling
+4. This allows scripts to work with both old and new URLs automatically
+
+**Pattern for Future:** Any time we discover URL changes:
+```python
+SOURCE_URL = "https://old-domain.com/..."
+FALLBACK_URL = "https://new-domain.com/..."
+```
+Then implement error-catching fallback (see code above). No need for hardcoded migration or version updates.
+
+**Benefits:**
+- Scripts work with stale/deprecated URLs (backward compatible)
+- Automatic recovery when primary URL fails
+- No breaking changes, just better resilience
+- User-provided corrections are honored without code rewrites
+
+**Impact:** 7 previously-failing companies now working reliably across multiple URL iterations
+
