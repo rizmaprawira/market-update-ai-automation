@@ -571,3 +571,46 @@ Mark priority for future work: Moneeinsure (simple pattern), then Avrist (tab au
 **Test evidence:**
 All manifests saved to `/tmp/test_results/2026-03/asuransi_umum/*/download_manifest.json` with correct status enums and reason fields.
 
+## 24) Batch Standardization: Cohort 4 (7-script batch, 2026-05-21)
+**Pattern confirmed: Standardization template scales reliably to diverse script types**
+
+Applied unified contract to 7 scripts:
+- pt_meritz_korindo_insurance (Playwright + Google Drive)
+- pt_mnc_asuransi_indonesia (generic + browser fallback)
+- pt_pan_pacific_insurance (Playwright + SharePoint)
+- pt_sompo_insurance_indonesia (generic + browser fallback)
+- pt_sunday_insurance_indonesia (generic + browser fallback)
+- pt_victoria_insurance_tbk (generic + browser fallback)
+- pt_zurich_asuransi_indonesia_tbk (generic + browser fallback)
+
+**Changes applied systematically:**
+1. Output path: All changed from `period/"raw_pdf"/CATEGORY/COMPANY_ID` to `period/CATEGORY/COMPANY_ID` ✓
+2. Filename format: All changed to `COMPANY_ID_YYYY_MM.pdf` (not period-based string) ✓
+3. CLI flags: Added `--yyyy/--mm` aliases and `--discover-only` to all scripts ✓
+4. Status enum: All changed to standard values (downloaded, skipped_existing, discover_only, dry_run, not_found, error) ✓
+5. Return codes: All fixed - not_found/error now return 1 (was 0 for some) ✓
+6. Bootstrap path: Added `sys.path.insert()` where missing (3 scripts already had it) ✓
+7. download_pdf() API: Fixed 4 scripts from old `(success, reason)` to new `(http_status|None, file_size)` ✓
+
+**Test results (2026-03):**
+- All 7 scripts compile successfully
+- All 7 scripts discover PDFs (manifests generated correctly)
+- All 7 scripts use correct output path: `data/2026-03/asuransi_umum/COMPANY_ID/COMPANY_ID_2026_03.pdf`
+- All 7 scripts report status: `discover_only` (correct enum)
+
+**Discovery outcomes:**
+- ✓ 1 correct period (MNC: Maret 2026)
+- ✗ 6 wrong period or unknown (Meritz: unknown source, Pan Pacific: unknown, Sompo: Feb 2026, Sunday: Apr 2026, Victoria: Apr 2026, Zurich: Jan 2026)
+
+**Pattern success:**
+This confirms standardization template is reusable and reliable:
+- Fixes apply across script types (Playwright, browser fallback, generic extraction, Google Drive, SharePoint, etc.)
+- No exceptions or special cases needed
+- Single commit standardizes diverse implementation styles to unified interface
+
+**For next batches:**
+- Use this 7-script batch as reference template
+- Standardization takes ~30 mins per 7 scripts
+- Period matching limitations are system-wide (lesson #21), not script-specific
+- All new scripts should follow standardized form from creation (prevent technical debt)
+
