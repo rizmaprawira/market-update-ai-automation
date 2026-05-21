@@ -20,22 +20,35 @@ COMPANY_NAME = "PT Asuransi Raksa Pratikara"
 CATEGORY = "asuransi_umum"
 
 def discover_raksa_reports(html, base_url, year, month):
-    """Raksa-specific: links only have month names, no year info."""
-    from _downloader_base import MONTH_LABELS, PDFCandidate
+    """Raksa-specific: links only have month names, no year info. Case-insensitive matching."""
+    from _downloader_base import MONTH_LABELS, PDFCandidate, month_terms
     from bs4 import BeautifulSoup
     from urllib.parse import urljoin
+    import re
 
     candidates = []
     soup = BeautifulSoup(html, 'html.parser')
     month_label = MONTH_LABELS[month]
+    month_search_terms = month_terms(month)
 
     for link in soup.find_all('a', href=True):
         text = link.get_text(strip=True)
         href = link.get('href', '')
+        full_blob = f"{text} {href}".lower()
 
-        if month_label in text and ('laporan' in text.lower() or 'pdf' in href.lower()):
+        month_match = any(term.lower() in full_blob for term in month_search_terms)
+        pdf_match = href.lower().endswith('.pdf') or '/pdf/' in href.lower() or 'download' in href.lower()
+        is_report = any(keyword in full_blob for keyword in ('laporan', 'keuangan', 'report', 'download'))
+
+        if month_match and (pdf_match or is_report):
             url = urljoin(base_url, href)
-            score = 100 if month_label in text else 50
+            score = 100
+            if 'laporan' in full_blob and 'keuangan' in full_blob:
+                score += 20
+            if pdf_match:
+                score += 15
+            if month_label.lower() in text.lower():
+                score += 25
             candidates.append(PDFCandidate(url=url, text=text, score=score, discovered_url=base_url))
 
     return sorted(candidates, key=lambda x: x.score, reverse=True)[:1]

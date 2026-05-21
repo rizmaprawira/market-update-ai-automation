@@ -431,12 +431,26 @@ def download_pdf(session, url, output_path, timeout=30, force=False):
             )
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             status, temp_path = _download_stream(verify=False)
-        # Retry with Referer header for 403 Forbidden
+        # Retry with Referer and then non-browser UA for 403 Forbidden
         elif "403" in message:
             LOGGER.warning("Got 403 Forbidden; retrying with Referer header")
             domain = url.split('/')[2] if '//' in url else ''
             referer = f"https://{domain}/" if domain else "https://www.google.com/"
-            status, temp_path = _download_stream(verify=True, headers={"Referer": referer})
+            try:
+                status, temp_path = _download_stream(verify=True, headers={"Referer": referer})
+            except Exception as e_referer:
+                # Some servers block browser-like UA but allow simple clients.
+                if "403" not in str(e_referer):
+                    raise
+                LOGGER.warning("Referer retry still returned 403; retrying with generic client UA")
+                status, temp_path = _download_stream(
+                    verify=True,
+                    headers={
+                        "Referer": referer,
+                        "User-Agent": "python-requests/2.31.0",
+                        "Accept": "*/*",
+                    },
+                )
         else:
             raise
     

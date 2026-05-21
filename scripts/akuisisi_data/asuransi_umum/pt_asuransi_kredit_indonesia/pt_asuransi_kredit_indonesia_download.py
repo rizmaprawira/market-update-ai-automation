@@ -134,13 +134,8 @@ def main():
         }])
         return 0
 
-    # Askrindo may serve JPG or PDF files - adjust output extension accordingly
-    file_ext = ".pdf" if selected_candidate.url.lower().endswith('.pdf') else ".jpg"
-    if file_ext == ".jpg":
-        output_file = output_dir / f"{COMPANY_ID}_{args.year:04d}_{args.month:02d}.jpg"
-        LOGGER.info(f"Document format: JPG (will save as {file_ext})")
-    else:
-        output_file = output_pdf
+    # Keep stable output filename for pipeline compatibility, even if source is image.
+    output_file = output_pdf
 
     http_status, file_size = download_pdf(
         session, selected_candidate.url, output_file, timeout=args.timeout, force=args.force
@@ -161,7 +156,7 @@ def main():
     }])
     
     if success:
-        LOGGER.info(f"Successfully downloaded to {output_pdf}")
+        LOGGER.info(f"Successfully downloaded to {output_file}")
     else:
         LOGGER.error(f"Failed to download: {reason}")
     

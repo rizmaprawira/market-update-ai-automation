@@ -1,34 +1,59 @@
-"""Download financial reports for PT Asuransi Etiqa Internasional Indonesia."""
+"""Download financial reports for PT Asuransi Etiqa Internasional Indonesia.
+
+Note: Only use Indonesia page (etiqa.co.id/hubungan-investor/).
+The international corporate site is NOT used.
+Monthly reports are available as direct PDF links: /docs/LK/YYYY/Laporan Keuangan per DD MMM YYYY.pdf
+"""
 import argparse
 import logging
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from _downloader_base import (
-    build_session, extract_pdf_links, download_pdf, write_manifest, write_debug_html,
-    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback,
-    discover_download_candidate, current_timestamp
+    build_session, extract_pdf_links, download_pdf, write_manifest,
+    current_timestamp, MONTH_LABELS, PDFCandidate, fetch_html_browser_domready
 )
 
 LOGGER = logging.getLogger("download_pt_asuransi_etiqa_internasional_indonesia")
 SOURCE_URL = "https://www.etiqa.co.id/hubungan-investor/"
-FALLBACK_URL = "https://etiqa.com/financial-statements/"
 COMPANY_ID = "pt_asuransi_etiqa_internasional_indonesia"
 COMPANY_NAME = "PT Asuransi Etiqa Internasional Indonesia"
 CATEGORY = "asuransi_umum"
 
 def discover_etiqa_reports(html, base_url, year, month):
-    """Etiqa-specific: filter for exact month/year match."""
-    from _downloader_base import MONTH_LABELS
-    candidates = extract_pdf_links(html, base_url, year, month)
-    if not candidates:
-        return []
-    month_name = MONTH_LABELS[month]
-    exact = [c for c in candidates if month_name in c.text and str(year) in c.url]
-    return exact if exact else candidates[:1]
+    """Extract Etiqa monthly PDF links from Indonesia page HTML.
+
+    Files are formatted as: Laporan Keuangan per 31 Jan 2026.pdf, etc.
+    Uses month label matching to prefer exact month over date parsing.
+    """
+    from bs4 import BeautifulSoup
+    from urllib.parse import urljoin
+
+    candidates = []
+    soup = BeautifulSoup(html, 'html.parser')
+    month_label = MONTH_LABELS[month]
+
+    for link in soup.find_all('a', href=True):
+        href = link.get('href', '').strip()
+        if not href or not href.lower().endswith('.pdf'):
+            continue
+
+        text = link.get_text(strip=True)
+        blob = f"{text} {href}".lower()
+
+        if str(year) in blob:
+            url = urljoin(base_url, href)
+            score = 50
+            month_label_lower = month_label.lower()
+            if month_label_lower in blob:
+                score += 50
+            if 'laporan' in blob and 'keuangan' in blob:
+                score += 20
+            candidates.append(PDFCandidate(url=url, text=text, score=score, discovered_url=base_url))
+
+    return sorted(candidates, key=lambda x: x.score, reverse=True)[:1]
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
@@ -38,84 +63,43 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Download validation without writing file")
     parser.add_argument("--discover-only", action="store_true", help="Stop after discovery")
     parser.add_argument("--force", action="store_true", help="Overwrite existing PDF")
-    parser.add_argument("--use-browser", action="store_true", help="Use Playwright browser rendering")
     parser.add_argument("--debug-html", action="store_true", help="Save debug HTML on failure")
     parser.add_argument("--timeout", type=int, default=30, help="HTTP timeout in seconds")
     args = parser.parse_args()
-    
+
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
-    
+
     if not 1 <= args.month <= 12:
         LOGGER.error("Month must be 1-12")
         return 1
-    
+
     session = build_session()
     period = f"{args.year:04d}-{args.month:02d}"
     output_dir = args.output_root / period / CATEGORY / COMPANY_ID
     output_pdf = output_dir / f"{COMPANY_ID}_{args.year:04d}_{args.month:02d}.pdf"
-    debug_dir = output_dir / "_debug_html"
-    
-    html = None
-    discovered_url = SOURCE_URL
-    fetch_error = None
 
-    LOGGER.info(f"Fetching from {SOURCE_URL}")
+    month_label = MONTH_LABELS[args.month]
+    LOGGER.info(f"Fetching from Indonesia page: {SOURCE_URL}")
 
     try:
-        if args.use_browser:
-            LOGGER.info("Using Playwright browser rendering")
-            html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
-        else:
-            html, discovered_url, used_browser = fetch_html_with_smart_fallback(
-                session, SOURCE_URL, args.year, args.month, args.timeout
-            )
+        html, discovered_url = fetch_html_browser_domready(SOURCE_URL, args.timeout, extra_wait_ms=1500)
     except Exception as e:
-        fetch_error = str(e)
-        LOGGER.warning(f"Primary URL failed: {fetch_error}")
-        if SOURCE_URL != FALLBACK_URL:
-            LOGGER.info(f"Trying fallback URL: {FALLBACK_URL}")
-            try:
-                if args.use_browser:
-                    html, discovered_url = fetch_html_browser(FALLBACK_URL, args.timeout)
-                else:
-                    html, discovered_url, used_browser = fetch_html_with_smart_fallback(
-                        session, FALLBACK_URL, args.year, args.month, args.timeout
-                    )
-                fetch_error = None
-            except Exception as e2:
-                fetch_error = str(e2)
-                LOGGER.error(f"Fallback URL also failed: {fetch_error}")
+        reason = f"failed to fetch: {e}"
+        LOGGER.error(reason)
+        write_manifest(output_dir, [{
+            "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
+            "source_page_url": SOURCE_URL, "discovered_page_url": SOURCE_URL,
+            "pdf_url": "", "target_year": args.year, "target_month": args.month,
+            "output_path": str(output_pdf), "status": "error", "reason": reason,
+            "timestamp": current_timestamp()
+        }])
+        return 1
 
-        if fetch_error:
-            reason = f"failed to fetch: {fetch_error}"
-            if args.debug_html:
-                write_debug_html(debug_dir, "", reason)
-            write_manifest(output_dir, [{
-                "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
-                "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-                "pdf_url": "", "target_year": args.year, "target_month": args.month,
-                "output_path": str(output_pdf), "status": "error", "reason": reason,
-                "timestamp": current_timestamp()
-            }])
-            return 1
-
-    candidates = discover_etiqa_reports(html, discovered_url, args.year, args.month)
+    candidates = discover_etiqa_reports(html, SOURCE_URL, args.year, args.month)
 
     if not candidates:
-        try:
-            fallback = discover_download_candidate(
-                session, html, discovered_url, args.year, args.month, timeout=args.timeout
-            )
-            candidates = [fallback]
-            LOGGER.info(f"Discovered candidate via multi-hop fallback: {fallback.url}")
-        except Exception:
-            pass
-
-    if not candidates:
-        reason = "no PDF candidates found"
+        reason = f"no PDF candidates found for {month_label} {args.year}"
         LOGGER.warning(reason)
-        if args.debug_html:
-            write_debug_html(debug_dir, html, reason)
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
@@ -123,7 +107,7 @@ def main():
             "output_path": str(output_pdf), "status": "not_found", "reason": reason,
             "timestamp": current_timestamp()
         }])
-        return 1
+        return 0
 
     selected_candidate = candidates[0]
     LOGGER.info(f"Selected: {selected_candidate.text[:60]}")
@@ -150,7 +134,7 @@ def main():
             "timestamp": current_timestamp()
         }])
         return 0
-    
+
     if output_pdf.exists() and not args.force:
         LOGGER.info(f"PDF already exists at {output_pdf}")
         write_manifest(output_dir, [{
@@ -162,20 +146,21 @@ def main():
         }])
         return 0
 
+    output_dir.mkdir(parents=True, exist_ok=True)
     try:
         http_status, file_size = download_pdf(
             session, selected_candidate.url, output_pdf, timeout=args.timeout, force=args.force
         )
         success = True
         reason = (
-            f"downloaded conventional financial report PDF (http_status={http_status}, bytes={file_size})"
+            f"downloaded monthly report ({http_status}, bytes={file_size})"
             if http_status is not None
-            else f"existing valid PDF was kept (bytes={file_size})"
+            else f"existing valid PDF kept (bytes={file_size})"
         )
         status = "downloaded" if http_status is not None else "skipped_existing"
     except Exception as e:
         success = False
-        reason = f"failed to download PDF: {e}"
+        reason = f"failed to download: {e}"
         status = "error"
 
     write_manifest(output_dir, [{
@@ -185,12 +170,12 @@ def main():
         "output_path": str(output_pdf), "status": status,
         "reason": reason, "timestamp": current_timestamp()
     }])
-    
+
     if success:
         LOGGER.info(f"Successfully downloaded to {output_pdf}")
     else:
         LOGGER.error(f"Failed to download: {reason}")
-    
+
     return 0 if success else 1
 
 if __name__ == "__main__":
