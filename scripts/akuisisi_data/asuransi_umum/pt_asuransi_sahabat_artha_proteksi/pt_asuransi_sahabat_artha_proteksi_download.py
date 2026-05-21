@@ -22,8 +22,9 @@ def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
     parser.add_argument("--year", "--yyyy", dest="year", type=int, required=True, help="Target year")
     parser.add_argument("--month", "--mm", dest="month", type=int, required=True, help="Target month (1-12)")
+    parser.add_argument("--discover-only", action="store_true", help="Stop after discovery, no download")
     parser.add_argument("--output-root", type=Path, default=Path("data"))
-    parser.add_argument("--dry-run", action="store_true", help="Discovery only, no download")
+    parser.add_argument("--dry-run", action="store_true", help="Validate download without writing")
     parser.add_argument("--force", action="store_true", help="Overwrite existing PDF")
     parser.add_argument("--use-browser", action="store_true", help="Use Playwright browser rendering")
     parser.add_argument("--debug-html", action="store_true", help="Save debug HTML on failure")
@@ -38,8 +39,8 @@ def main():
     
     session = build_session()
     period = f"{args.year:04d}-{args.month:02d}"
-    output_dir = args.output_root / period / "raw_pdf" / CATEGORY / COMPANY_ID
-    output_pdf = output_dir / f"{COMPANY_ID}_{period}.pdf"
+    output_dir = args.output_root / period / CATEGORY / COMPANY_ID
+    output_pdf = output_dir / f"{COMPANY_ID}_{args.year:04d}_{args.month:02d}.pdf"
     debug_dir = output_dir / "_debug_html"
     
     LOGGER.info(f"Fetching from {SOURCE_URL}")
@@ -61,7 +62,7 @@ def main():
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": SOURCE_URL,
             "pdf_url": "", "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "failed", "reason": reason,
+            "output_path": str(output_pdf), "status": "error", "reason": reason,
             "timestamp": current_timestamp()
         }])
         return 1
@@ -77,7 +78,7 @@ def main():
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
             "pdf_url": "", "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "no_pdf_found", "reason": reason,
+            "output_path": str(output_pdf), "status": "not_found", "reason": reason,
             "timestamp": current_timestamp()
         }])
         return 0
@@ -102,7 +103,7 @@ def main():
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
             "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "already_exists", "reason": "file exists",
+            "output_path": str(output_pdf), "status": "skipped_existing", "reason": "file exists",
             "timestamp": current_timestamp()
         }])
         return 0
@@ -115,7 +116,7 @@ def main():
         "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
         "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
         "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
-        "output_path": str(output_pdf), "status": "success" if success else "failed",
+        "output_path": str(output_pdf), "status": "downloaded" if success else "failed",
         "reason": reason, "timestamp": current_timestamp()
     }])
     
