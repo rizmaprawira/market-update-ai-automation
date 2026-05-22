@@ -63,14 +63,14 @@ def main():
     jenis = "Asuransi Umum"
 
     aset_2026, aset_prev = extract_two_numbers(text, "35 Jumlah Aset (21 + 34)")
-    ekuitas_2026, ekuitas_prev = extract_two_numbers(text, "19 Jumlah Ekuitas (16 s/d 19)")
+    ekuitas_2026, ekuitas_prev = extract_two_numbers(text, "19 Jumlah Ekuitas (15 s.d. 17)")
     pend_premi_2026, pend_premi_prev = extract_two_numbers(text, "19 PENDAPATAN UNDERWRITING (17+18)")
     premi_bruto_2026, premi_bruto_prev = extract_two_numbers(text, "6 Jumlah Premi Bruto (3+4-5)")
     premi_reasu_2026, premi_reasu_prev = extract_two_numbers(text, "10 Jumlah Premi Reasuransi (8-9)")
     premi_neto_2026, premi_neto_prev = extract_two_numbers(text, "11 Premi Neto (6-10)")
     hasil_uw_2026, hasil_uw_prev = extract_two_numbers(text, "28 HASIL UNDERWRITING (19-27)")
     laba_komp_2026, laba_komp_prev = extract_two_numbers(text, "45 TOTAL LABA (RUGI) KOMPREHENSIF (43+44)")
-    solv_2026, solv_prev = extract_two_numbers(text, "C. Rasio Pencapaian Solvabilitas (%)")
+    solv_2026, solv_prev = extract_two_numbers(text, "3)")
     lik_2026, lik_prev = extract_two_numbers(text, "b. Rasio Likuiditas (%)")
 
     current_period = f"{args.yyyy}-{args.mm:02d}"
