@@ -1,9 +1,11 @@
-"""Download financial reports for PT Asuransi Allianz Utama Indonesia."""
+"""Download financial reports for PT Indolife Pensiontama."""
 import argparse
 import logging
 import sys
 import time
 from pathlib import Path
+from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _downloader_base import (
@@ -17,12 +19,80 @@ COMPANY_ID = "pt_indolife_pensiontama"
 COMPANY_NAME = "PT Indolife Pensiontama"
 CATEGORY = "asuransi_jiwa"
 
+MONTH_NAMES = {
+    1: "JANUARI", 2: "FEBRUARI", 3: "MARET", 4: "APRIL",
+    5: "MEI", 6: "JUNI", 7: "JULI", 8: "AGUSTUS",
+    9: "SEPTEMBER", 10: "OKTOBER", 11: "NOVEMBER", 12: "DESEMBER"
+}
+
+MONTH_DAYS = {
+    1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30,
+    7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31
+}
+
+def discover_indolife_pdf(year: int, month: int, timeout: int = 30) -> str:
+    """Discover PDF URL using Playwright dropdown interaction."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.goto(SOURCE_URL, timeout=timeout * 1000, wait_until="domcontentloaded")
+        page.wait_for_timeout(1000)
+
+        try:
+            # Click the "Laporan Keuangan" tab if needed
+            tab_selector = "a[href*='laporan-keuangan'], button:has-text('Laporan Keuangan')"
+            tabs = page.query_selector_all("a, button")
+            for tab in tabs:
+                if "laporan" in tab.inner_text().lower() and "keuangan" in tab.inner_text().lower():
+                    tab.click()
+                    page.wait_for_timeout(500)
+                    break
+
+            # Get the dropdown list - look for elements containing the monthly reports
+            html = page.content()
+            soup = BeautifulSoup(html, "html.parser")
+
+            # Find the dropdown or list containing report links
+            day = MONTH_DAYS[month]
+            target_text = f"LAPORAN KEUANGAN BULANAN PER {day:02d} {MONTH_NAMES[month]} {year}"
+
+            # Look for any link or button containing the target month report
+            candidates = []
+            for element in soup.find_all(['a', 'button', 'div']):
+                text = element.get_text(strip=True)
+                if MONTH_NAMES[month] in text and str(year) in text and "LAPORAN KEUANGAN" in text:
+                    # Try to extract href or onclick
+                    href = element.get("href")
+                    if href and href.startswith("http"):
+                        candidates.append(href)
+                    elif href and not href.startswith("http"):
+                        candidates.append(f"https://indolife.co.id{href}")
+
+            if candidates:
+                return candidates[0]
+
+            # Fallback: Try clicking on elements in the dropdown to trigger navigation
+            for element in soup.find_all(['a', 'button', 'li']):
+                text = element.get_text(strip=True)
+                if MONTH_NAMES[month] in text and str(year) in text:
+                    # Try to find the link within or near this element
+                    link = element.find('a', href=True)
+                    if link and link.get('href'):
+                        href = link.get('href')
+                        if href.startswith("http"):
+                            return href
+                        else:
+                            return f"https://indolife.co.id{href}"
+
+            return None
+
+        finally:
+            browser.close()
+
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
-    parser.add_argument("--year", type=int, required=True, help="Target year")
-    parser.add_argument("--yyyy", dest="year", type=int, help="Target year (alias for --year)")
-    parser.add_argument("--month", type=int, help="Target month (1-12)")
-    parser.add_argument("--mm", dest="month", type=int, help="Target month 1-12 (alias for --month)")
+    parser.add_argument("--year", "--yyyy", dest="year", type=int, required=True, help="Target year")
+    parser.add_argument("--month", "--mm", dest="month", type=int, required=True, help="Target month (1-12)")
     parser.add_argument("--output-root", type=Path, default=Path("data"))
     parser.add_argument("--dry-run", action="store_true", help="Discovery only, no download")
     parser.add_argument("--discover-only", action="store_true", help="Stop after discovery, return 0")
@@ -31,11 +101,11 @@ def main():
     parser.add_argument("--debug-html", action="store_true", help="Save debug HTML on failure")
     parser.add_argument("--timeout", type=int, default=30, help="HTTP timeout in seconds")
     args = parser.parse_args()
-    
+
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
-    
-    if not 1 <= args.month <= 12:
-        LOGGER.error("Month must be 1-12")
+
+    if not args.year or not args.month or not 1 <= args.month <= 12:
+        LOGGER.error("Year and month (1-12) are required")
         return 1
     
     session = build_session()

@@ -27,33 +27,33 @@ def main():
 
     PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
     period_dir = PROJECT_ROOT / "data" / f"{args.yyyy}-{args.mm:02d}"
-    company_dir = period_dir / "asuransi_umum" / "pt_asuransi_jasa_tania_tbk"
-    INPUT_TXT = company_dir / f"pt_asuransi_jasa_tania_tbk_{args.yyyy}_{args.mm:02d}.txt"
-    COMPANY_CSV = company_dir / f"pt_asuransi_jasa_tania_tbk_key_metric_{args.yyyy}_{args.mm:02d}.csv"
+    company_dir = period_dir / "asuransi_umum" / "pt_asuransi_digital_bersama_tbk"
+    INPUT_TXT = company_dir / f"pt_asuransi_digital_bersama_tbk_{args.yyyy}_{args.mm:02d}.txt"
+    COMPANY_CSV = company_dir / f"pt_asuransi_digital_bersama_tbk_key_metric_{args.yyyy}_{args.mm:02d}.csv"
     DATABASE_CSV = period_dir / f"database_asuransi_umum_{args.yyyy}_{args.mm:02d}.csv"
 
     text = INPUT_TXT.read_text(encoding="utf-8", errors="ignore")
     text = re.sub(r"\s+", " ", text)
 
-    aset_2026, aset_prev = extract_two_numbers(text, "13. Jumlah Aset")
-    ekuitas_2026, ekuitas_prev = extract_two_numbers(text, "15. Jumlah Ekuitas")
-    pend_premi_2026, pend_premi_prev = extract_two_numbers(text, "18. PENDAPATAN UNDERWRITING")
-    premi_bruto_2026, premi_bruto_prev = extract_two_numbers(text, "6. Jumlah Premi Bruto")
-    premi_reasu_2026, premi_reasu_prev = extract_two_numbers(text, "10. Jumlah Premi Reasuransi")
-    premi_neto_2026, premi_neto_prev = extract_two_numbers(text, "11. Premi Neto")
-    hasil_uw_2026, hasil_uw_prev = extract_two_numbers(text, "29. HASIL UNDERWRITING")
-    laba_komp_2026, laba_komp_prev = extract_two_numbers(text, "39. JUMLAH LABA KOMPREHENSIF")
-    solv_2026, solv_prev = extract_two_numbers(text, "D. Rasio Pencapaian (%) 3)")
-    lik_2026, lik_prev = extract_two_numbers(text, "b. Rasio Likuiditas (%)")
+    aset_2026, aset_prev = extract_two_numbers(text, "35 Jumlah Aset")
+    ekuitas_2026, ekuitas_prev = extract_two_numbers(text, "Jumlah Ekuitas (16 s/d 20)")
+    pend_premi_2026, pend_premi_prev = extract_two_numbers(text, "Jumlah Pendapatan Underwriting")
+    premi_bruto_2026, premi_bruto_prev = extract_two_numbers(text, "Jumlah Premi Bruto")
+    premi_reasu_2026, premi_reasu_prev = extract_two_numbers(text, "Jumlah Premi Reasuransi")
+    premi_neto_2026, premi_neto_prev = pend_premi_2026, pend_premi_prev
+    hasil_uw_2026, hasil_uw_prev = extract_two_numbers(text, "HASIL UNDERWRITING")
+    laba_komp_2026, laba_komp_prev = extract_two_numbers(text, "KOMPREHENSIF")
+    solv_2026, solv_prev = extract_two_numbers(text, "D Rasio Pencapaian")
+    lik_2026, lik_prev = extract_two_numbers(text, "b Rasio Likuiditas")
 
     current_period = f"{args.yyyy}-{args.mm:02d}"
     rows = [{
-        "periode": current_period, "jenis_asuransi": "Asuransi Umum", "nama_perusahaan": "PT Asuransi Jasa Tania Tbk",
+        "periode": current_period, "jenis_asuransi": "Asuransi Umum", "nama_perusahaan": "PT Asuransi Digital Bersama Tbk",
         "aset": aset_2026, "ekuitas": ekuitas_2026, "pendapatan_premi": pend_premi_2026, "premi_bruto": premi_bruto_2026,
         "premi_reasuransi": premi_reasu_2026, "premi_neto": premi_neto_2026, "hasil_underwriting": hasil_uw_2026,
         "laba_rugi_komprehensif": laba_komp_2026, "rasio_solvabilitas": solv_2026, "rasio_likuiditas": lik_2026,
     }, {
-        "periode": f"{args.yyyy-1}-{args.mm:02d}", "jenis_asuransi": "Asuransi Umum", "nama_perusahaan": "PT Asuransi Jasa Tania Tbk",
+        "periode": f"{args.yyyy-1}-{args.mm:02d}", "jenis_asuransi": "Asuransi Umum", "nama_perusahaan": "PT Asuransi Digital Bersama Tbk",
         "aset": aset_prev, "ekuitas": ekuitas_prev, "pendapatan_premi": pend_premi_prev, "premi_bruto": premi_bruto_prev,
         "premi_reasuransi": premi_reasu_prev, "premi_neto": premi_neto_prev, "hasil_underwriting": hasil_uw_prev,
         "laba_rugi_komprehensif": laba_komp_prev, "rasio_solvabilitas": solv_prev, "rasio_likuiditas": lik_prev,
