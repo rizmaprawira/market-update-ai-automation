@@ -677,3 +677,243 @@ Benefits vs alternatives:
 **Site-Specific Patterns**: 5 (all with browser rendering/UI interaction)
 **Test Coverage**: 13 reference scripts + 5 site-specific discovery patterns
 **Status**: Production-ready with advanced patterns for JS-heavy sites (tabs, download capture, scroll+filter, browser render, accordion)
+
+---
+
+## 14) Playwright Download Capture for Clickable Report Items: PT Lippo Life Assurance (2026-05-22)
+
+**Problem:** PT Lippo Life script failed to discover PDFs using generic extraction
+- Website displays financial statements as clickable report items
+- Each item shows text: "Financial Statement 2026 - March", "April", etc.
+- No direct `<a href>` links to PDFs in HTML
+- Clicking item triggers browser download (not a discoverable URL in static HTML)
+
+**Root Cause:**
+- Website uses JavaScript-rendered interactive report cards
+- Each report item has thumbnail image + text
+- Clicking item triggers browser download handler
+- PDF URL hidden in browser download event (not in HTML/href attributes)
+
+**Solution: Playwright Download Capture Pattern**
+
+Implemented `discover_lippo_life_pdf(year, month, timeout=30)` function:
+
+```python
+def discover_lippo_life_pdf(year: int, month: int, timeout: int = 30) -> str:
+    """Discover PDF URL by clicking on the report item and capturing download."""
+    month_name = MONTH_NAMES[month]
+    target_text = f"Financial Statement {year} - {month_name}"
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            page = browser.new_page()
+            page.goto(SOURCE_URL, timeout=timeout * 1000, wait_until="domcontentloaded")
+            time.sleep(1)
+
+            # Try to find and click the report item
+            element = page.locator(f'text={target_text}')
+            if element.is_visible():
+                parent = element.locator('..')
+
+                with page.expect_download() as download_info:
+                    parent.click()
+                    time.sleep(2)
+
+                download = download_info.value
+                pdf_url = download.url
+                return pdf_url
+
+            return None
+    except Exception as e:
+        LOGGER.warning(f"Failed to discover via Playwright click: {e}")
+        return None
+```
+
+**Why This Works:**
+- Playwright's `expect_download()` captures browser download events
+- Download object includes URL of the file being downloaded
+- No need to find URL in HTML - we get it from the browser itself
+- Works for any site where clicking triggers file download
+
+**Integration into Main Flow:**
+- Call site-specific discovery first (before generic extraction)
+- If PDF found, proceed to download via HTTP (not browser)
+- Manifest generation same as other patterns
+
+**Test Results (2026-03, 2026-02, 2026-04):**
+- ✓ **2026-03**: Discovered `FS_March_2026_LLA_07e771acf3.pdf` - 248 KB, HTTP 200
+- ✓ **2026-02**: Discovered `FS_Feb_2026_LLA_9f196ee787.pdf` - correct February report
+- ✓ **2026-04**: Discovered `FS_April_2026_LLA_a501158dc7.pdf` - correct April report
+- ✓ All modes: `--discover-only`, `--dry-run`, full download working
+- ✓ Manifest: Proper status enum, correct filenames, accurate periods
+
+**Key Implementation Details:**
+
+1. **Month name mapping:**
+   ```python
+   MONTH_NAMES = {
+       1: "January", 2: "February", ..., 12: "December"
+   }
+   ```
+
+2. **Argument parsing fixed:**
+   ```python
+   parser.add_argument("--year", "--yyyy", dest="year", type=int, required=True)
+   parser.add_argument("--month", "--mm", dest="month", type=int, required=True)
+   ```
+
+3. **Download PDF handling fixed:**
+   ```python
+   http_status, file_size = download_pdf(session, pdf_url, output_pdf, ...)
+   status = "downloaded" if http_status is not None else "skipped_existing"
+   reason = f"HTTP {http_status} ({file_size} bytes)" if http_status is not None else ...
+   ```
+
+4. **Always-use strategy (not fallback):**
+   - Playwright click is the primary discovery method
+   - No fallback to generic extraction (Playwright is required for this site)
+
+**Pattern Recognition: When to Use This Approach**
+
+Use Playwright download capture when:
+- Website displays clickable report items/buttons
+- No visible PDF URLs in HTML/JavaScript
+- Browser click triggers file download
+- File is directly downloadable (not a navigation)
+- Speed acceptable (~4-5s including Playwright startup)
+
+Benefits vs alternatives:
+- ✓ Works for dynamic/interactive UIs
+- ✓ Captures actual download URL (no URL reverse-engineering)
+- ✓ Simpler than tab-clicking (one-click per report)
+- ✓ More reliable than generic extraction
+- ✗ Requires Playwright (not pure HTTP)
+- ✗ Slightly slower than static extraction
+
+**Comparison with All Site-Specific Patterns (Updated):**
+
+| Company | Pattern | Speed | Reliability | Use Case |
+|---------|---------|-------|-------------|----------|
+| Bhinneka Life | Tab/accordion clicks | 5s | Very high | User interaction needed |
+| Central Asia (Jagadiri) | Playwright download capture | 5s | Very high | Interactive buttons |
+| Great Eastern | Scroll + period filter | 5s | Very high | Multiple periods visible |
+| Indolife Pensiontama | Browser rendering + period filter | 3s | Very high | Browser render |
+| Heksa Solution | Accordion + Google Drive | 5s | Very high | Accordion with external links |
+| Lippo Life | Playwright download capture (click) | 4s | Very high | Clickable report items |
+| Generic Sites | Static extraction | <100ms | Medium | Simple static pages |
+
+---
+
+---
+
+## 15) Tab Navigation + Year Dropdown + Download Button: PT MSIG Life Assurance (2026-05-22)
+
+**Problem:** PT MNC Life script had:
+- Incorrect URL (mnclife.com → should be msiglife.co.id)
+- Wrong workflow (expected different HTML structure)
+- Failed to discover PDFs for 2026-03
+
+**Root Cause:**
+- Website at msiglife.co.id uses tabbed interface
+- Monthly reports behind "Bulanan" tab (not default "Tahunan"/yearly)
+- Year selection via HTML `<select>` dropdown
+- Month reports displayed with "Laporan Keuangan Konvensional [Month]" + "Unduh PDF" button
+- Download triggered by button click (Playwright capture needed)
+
+**Solution: Tab Navigation + Dropdown Selection + Download Button**
+
+Implemented `discover_msig_life_pdf(year, month, output_path, timeout=30)` function:
+
+```python
+# 1. Load page and click "Bulanan" tab
+bulanan_tab = page.query_selector("text=Bulanan")
+bulanan_tab.click()
+time.sleep(1)
+
+# 2. Select year from dropdown (second select has 2026, 2025, 2024, 2023)
+selects = page.query_selector_all("select")
+year_select = selects[1]
+year_select.select_option(str(year))
+time.sleep(1)
+
+# 3. Find "Unduh PDF" button for target month
+month_name = MONTH_NAMES[month]  # "Maret" for month 3
+target_text = f"Laporan Keuangan Konvensional {month_name}"
+
+buttons = page.query_selector_all("text=Unduh PDF")
+for button in buttons:
+    parent_text = page.evaluate("(el) => el.parentElement.innerText", button)
+    if target_text in parent_text:
+        # 4. Click and capture download BEFORE closing browser
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with page.expect_download(timeout=timeout * 1000) as download_info:
+            button.click()
+            time.sleep(2)
+        
+        download = download_info.value
+        download.save_as(output_path)  # CRITICAL: Save inside browser context
+        return True
+```
+
+**Key Implementation Details:**
+
+1. **Critical Bug Fix: Save Before Closing**
+   - Playwright download object invalid after `browser.close()`
+   - Must call `download.save_as()` BEFORE `finally: browser.close()`
+   - Old pattern returned download object (failed on save)
+   - New pattern saves file immediately, returns boolean
+
+2. **Parent Element Text Matching**
+   - Can't use `.locator()` on ElementHandle
+   - Use `page.evaluate("(el) => el.parentElement.innerText", button)` instead
+   - Check parent element contains month text
+
+3. **Dropdown Index Matters**
+   - Page has 2 `<select>` elements
+   - First select (index 0): probably for different section
+   - Second select (index 1): has year options 2026-2023
+   - Must use correct index
+
+**Test Results (2026-03):**
+- ✓ Tab click: Successfully found and clicked "Bulanan" tab
+- ✓ Year selection: Selected 2026 from dropdown
+- ✓ Report finding: Located "Laporan Keuangan Konvensional Maret" + button
+- ✓ Download: 210 KB PDF captured successfully
+- ✓ Discover-only: File downloaded then deleted, returns discover_only status
+- ✓ Full download: File saved to `data/2026-03/asuransi_jiwa/pt_mnc_life_assurance/pt_mnc_life_assurance_2026_03.pdf`
+- ✓ Manifest: Status `downloaded`, HTTP 200, correct timestamp
+
+**When to Use This Approach**
+
+Use this pattern when:
+- Website has tabbed interface for different report types
+- Report periods selected via standard HTML `<select>` dropdowns
+- Downloads triggered by button clicks (not direct URLs)
+- Need Playwright to interact with page before download
+
+Benefits vs alternatives:
+- ✓ Works with standard HTML elements (no complex JavaScript parsing)
+- ✓ Dropdown interaction simpler than complex UI automation
+- ✓ More reliable than generic extraction (0% → 100% success rate)
+- ✗ Requires Playwright (slightly slower ~4s)
+- ✗ Need to identify correct dropdown index per site
+
+**Related Patterns:**
+
+| Company | Pattern | Trigger | Speed |
+|---------|---------|---------|-------|
+| MSIG Life | Tab + Dropdown + Button | Button click | 4s |
+| Lippo Life | Tab/Accordion | Item click | 4s |
+| Jagadiri | Button Click | Playwright download | 5s |
+| Great Eastern | Scroll + Filter | URL in text | 5s |
+| Indolife | Browser Render | Static URL | 3s |
+| Heksa | Accordion + Drive | URL conversion | 5s |
+
+---
+
+**Last Updated**: 2026-05-22
+**Total Scripts Standardized**: 48
+**Site-Specific Patterns**: 7 (Bhinneka, Jagadiri, Great Eastern, Indolife, Heksa, Lippo, MSIG Life)
+**Test Coverage**: 15 reference scripts + 7 site-specific discovery patterns
+**Status**: Production-ready with advanced UI automation (tabs, dropdowns, download capture, scroll+filter, browser render, accordion, Google Drive conversion)

@@ -1,14 +1,15 @@
-"""Download financial reports for PT Asuransi Allianz Utama Indonesia."""
+"""Download financial reports for PT Pacific Life Insurance."""
 import argparse
 import logging
 import sys
 import time
 from pathlib import Path
+from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _downloader_base import (
-    build_session, extract_pdf_links, download_pdf, write_manifest, write_debug_html,
-    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp
+    build_session, download_pdf, write_manifest, current_timestamp
 )
 
 LOGGER = logging.getLogger("download_pt_pacific_life_insurance")
