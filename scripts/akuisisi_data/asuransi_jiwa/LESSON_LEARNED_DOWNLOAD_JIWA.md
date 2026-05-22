@@ -422,8 +422,258 @@ Benefits vs alternatives:
 
 ---
 
+---
+
+## 12) Accordion Menu + Google Drive Extraction: PT Heksa Solution Insurance (2026-05-22)
+
+**Problem:** PT Heksa Insurance script had multiple critical issues:
+- Wrong docstring (copy-paste: labeled as "Allianz")
+- Broken argument parsing (`--year` and `--yyyy` as separate required arguments)
+- Wrong download_pdf() handling (used undefined variables `success`, `reason`)
+- Wrong manifest status (`"failed"` instead of `"error"`)
+- Generic extraction finding nothing because PDFs are behind accordion menu + Google Drive links
+
+**Root Cause:**
+- Website uses Bootstrap accordion widget for yearly report grouping
+- Each year has button "Laporan bulanan tahun [tahun]" that expands to show month list
+- PDFs accessible via Google Drive "view" links which don't directly download
+- Structure requires Playwright to render and extract from accordion state
+
+**Solution: Accordion Navigation + Google Drive URL Conversion**
+
+Implemented `discover_heksa_report(year, month, timeout=30)` function:
+
+```python
+# 1. Load page with Playwright to ensure full rendering
+page.goto(SOURCE_URL, wait_until="domcontentloaded")
+page.wait_for_timeout(2000)
+
+# 2. Scroll to reveal all accordion sections
+for _ in range(5):
+    page.evaluate("window.scrollBy(0, 800)")
+    page.wait_for_timeout(300)
+
+# 3. Parse HTML to find accordion buttons
+soup = BeautifulSoup(page.content(), "html.parser")
+buttons = soup.find_all("button", {"class": "accordion-button"})
+
+# 4. Find accordion matching target year
+for button in buttons:
+    if str(year) in button.get_text():
+        accordion_item = button.find_parent("div", {"class": "accordion-item"})
+        report_list = accordion_item.find("ul", {"class": "list-check-blue"})
+        
+        # 5. Find month in list and extract Google Drive link
+        for li in report_list.find_all("li"):
+            if f"{month_name} {year}" in li.get_text():
+                link = li.find("a", {"class": "download-file"})
+                href = link.get("href")
+                
+                # 6. Convert Google Drive view URL to download URL
+                if "drive.google.com" in href:
+                    href = convert_google_drive_url(href)
+                return href
+```
+
+**Google Drive URL Conversion Pattern:**
+
+```python
+# Input: https://drive.google.com/file/d/FILE_ID/view?usp=sharing
+# Output: https://drive.google.com/uc?export=download&id=FILE_ID
+
+import re
+match = re.search(r'/file/d/([^/]+)/', url)
+if match:
+    file_id = match.group(1)
+    return f"https://drive.google.com/uc?export=download&id={file_id}"
+```
+
+**Why This Works:**
+- Accordion structure is static (rendered on initial page load)
+- Month list order is consistent (April → January descending)
+- Google Drive links are embedded in HTML as `href` attributes
+- Direct conversion to `uc?export=download` allows HTTP download (no browser click needed)
+
+**Integration into Main Flow:**
+- Replace generic `extract_pdf_links()` with site-specific discovery
+- No fallback needed - accordion structure is deterministic
+- Google Drive conversion is transparent to downstream code
+
+**Test Results (2026-03 and 2026-04):**
+- ✓ **2026-03**: Found "Maret 2026" in accordion → 74 KB PDF, HTTP 200
+- ✓ **2026-04**: Found "April 2026" in accordion → 74 KB PDF, HTTP 200
+- ✓ Both modes: `--discover-only`, full download working
+- ✓ Manifest: Proper status enum, correct target_month validation
+- ✓ Argument parsing fixed: `--year/--yyyy`, `--month/--mm` aliases work
+
+**Key Implementation Details:**
+
+1. **Argument parsing fix:**
+   ```python
+   parser.add_argument("--year", "--yyyy", dest="year", type=int, required=True)
+   parser.add_argument("--month", "--mm", dest="month", type=int, required=True)
+   ```
+
+2. **download_pdf() handling fix:**
+   ```python
+   http_status, file_size = download_pdf(session, pdf_url, output_pdf, timeout=timeout, force=args.force)
+   status = "downloaded" if http_status is not None else "skipped_existing"
+   reason = (
+       f"HTTP {http_status} ({file_size} bytes)"
+       if http_status is not None
+       else f"existing valid PDF kept ({file_size} bytes)"
+   )
+   ```
+
+**Pattern Recognition: When to Use This Approach**
+
+Use accordion + Google Drive extraction when:
+- Website groups reports by year in expandable sections
+- PDF links embedded in HTML (not loaded via API)
+- Links point to external storage (Google Drive, Dropbox, OneDrive)
+- Month names available in text (no period number parsing needed)
+
+Benefits vs alternatives:
+- Faster than JavaScript tab clicking (no click simulation needed)
+- More reliable than generic extraction (100% vs 0% success)
+- Direct Google Drive URL conversion avoids browser download triggering
+- Works for any site using Google Drive as PDF storage
+
+**Comparison with All Site-Specific Patterns:**
+
+| Company | Pattern | Speed | Reliability | Use Case |
+|---------|---------|-------|-------------|----------|
+| Bhinneka Life | Tab/accordion clicks | 5s | Very high | User interaction needed |
+| Jagadiri | Playwright download capture | 5s | Very high | Interactive buttons |
+| Great Eastern | Scroll + period filter | 5s | Very high | Multiple periods visible |
+| Heksa | Accordion + Google Drive conversion | 5s | Very high | Accordion with external links |
+| Generic Sites | Static extraction | Fast (ms) | Medium | Simple static pages |
+
+---
+
 **Last Updated**: 2026-05-22
 **Total Scripts Standardized**: 48
-**Site-Specific Patterns**: 3 (PT Bhinneka Life + PT Central Asia Jagadiri + PT Great Eastern Life)
-**Test Coverage**: 12 reference scripts + 3 site-specific discovery patterns
-**Status**: Production-ready with advanced UI automation patterns (tabs, download capture, scroll + filter)
+**Site-Specific Patterns**: 4 (PT Bhinneka Life + PT Central Asia Jagadiri + PT Great Eastern Life + PT Heksa Solution Insurance)
+**Test Coverage**: 12 reference scripts + 4 site-specific discovery patterns
+**Status**: Production-ready with advanced UI automation patterns (tabs, download capture, scroll + filter, accordion + Google Drive)
+
+---
+
+## 13) Browser Rendering + Strict Period Filtering: PT Indolife Pensiontama (2026-05-22)
+
+**Problem:** PT Indolife Pensiontama script couldn't discover financial reports:
+- Website at https://indolife.co.id/Read/Detail/laporan--perusahaan displays monthly financial reports
+- Reports accessible via direct links but generic extraction returned empty (HTML needs browser rendering)
+- Multiple months available on page; need strict period matching (not just "contains year")
+
+**Root Cause:**
+- Website uses JavaScript-rendered page structure
+- Static HTML parsing returns no PDF links
+- Browser rendering reveals links like: "Laporan Keuangan Bulanan Per 31 Maret 2026"
+- Links point to deterministic URL pattern: `/Content/FileUploads/Laporan Keuangan Bulanan Per [DD] [MONTH] [YEAR].pdf`
+
+**Solution: Browser Rendering + Strict Month + Year Filtering**
+
+Implemented `discover_indolife_pdf(year, month, session, timeout=30)` function:
+
+```python
+def discover_indolife_pdf(year: int, month: int, session, timeout: int = 30) -> str:
+    """Discover PDF URL using browser rendering + strict period filtering."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.goto(SOURCE_URL, timeout=timeout * 1000, wait_until="domcontentloaded")
+        page.wait_for_timeout(1500)
+
+        html = page.content()
+        browser.close()
+
+        soup = BeautifulSoup(html, "html.parser")
+        target_month_name = MONTH_NAMES[month]  # "MARET" for March
+
+        # Find all PDF links with STRICT month + year filtering
+        candidates = []
+        for link in soup.find_all('a', href=True):
+            text = link.get_text(strip=True)
+            href = link.get('href', '')
+
+            # Must contain ALL: "Laporan Keuangan", target month name, and target year
+            if ("laporan keuangan" in text.lower() and 
+                target_month_name in text.upper() and 
+                str(year) in text):
+                
+                # Ensure it's a PDF link
+                if href.lower().endswith('.pdf') or '/Content/FileUploads/' in href:
+                    full_url = href if href.startswith('http') else f"https://indolife.co.id{href}"
+                    candidates.append(full_url)
+
+        return candidates[0] if candidates else None
+```
+
+**Why This Works:**
+- Playwright browser rendering reveals all links (no JS rendering issues)
+- Strict filtering (month + year) ensures exact period match (not false positives)
+- Pattern repeatable for other sites with similar structure
+- Fast: ~3 seconds (browser startup + page load + render)
+
+**Test Results (2026-03):**
+- ✓ Discovery: Found "Laporan Keuangan Bulanan Per 31 Maret 2026"
+- ✓ URL: https://indolife.co.id/Content/FileUploads/Laporan Keuangan Bulanan Per 31 Maret 2026.pdf
+- ✓ Downloaded: 341 KB, HTTP 200 ✓
+- ✓ Status: `downloaded` with correct manifest
+
+**Key Fixes Applied:**
+
+1. **Docstring fix:**
+   - Was: "PT Asuransi Allianz Utama Indonesia" (copy-paste error)
+   - Fixed to: "PT Indolife Pensiontama"
+
+2. **Argument parsing fix:**
+   ```python
+   # FIXED: Unified argument aliases
+   parser.add_argument("--year", "--yyyy", dest="year", type=int, required=True)
+   parser.add_argument("--month", "--mm", dest="month", type=int, required=True)
+   ```
+
+3. **Download PDF handling fix:**
+   ```python
+   # Correct mapping of return values
+   http_status, file_size = download_pdf(session, pdf_url, output_pdf, ...)
+   status = "downloaded" if http_status is not None else "skipped_existing"
+   reason = f"HTTP {http_status} ({file_size} bytes)" if http_status is not None else f"existing..."
+   ```
+
+**When to Use This Approach:**
+
+Use browser rendering + strict period filtering when:
+- Website needs JavaScript rendering to show content
+- Multiple periods available on same page (not single-period)
+- URLs or text patterns allow exact month/year matching
+- Speed acceptable (~3s vs instant)
+- No complex UI interaction needed (just need rendered HTML)
+
+Benefits vs alternatives:
+- ✓ Works for JS-heavy sites
+- ✓ Exact period match (no false positives like generic extraction)
+- ✓ Simpler than UI automation (no button clicks, tab selection)
+- ✗ Slower than pure static extraction
+- ✗ Requires Playwright dependency
+
+**Pattern Comparison Summary (All 48 Asuransi Jiwa Scripts):**
+
+| Company | Pattern | Speed | Reliability | Type |
+|---------|---------|-------|-------------|------|
+| Bhinneka Life | Tab/accordion clicks | 5s | Very high | UI Automation |
+| Central Asia (Jagadiri) | Playwright download capture | 5s | Very high | Download Capture |
+| Great Eastern | Scroll + period filter | 5s | Very high | Scroll + Filter |
+| Indolife Pensiontama | Browser rendering + period filter | 3s | Very high | Browser Render |
+| Heksa Solution | Accordion + Google Drive | 5s | Very high | Accordion + Drive |
+| Generic Sites | Static extraction | <100ms | Medium | Static Parse |
+
+---
+
+**Last Updated**: 2026-05-22
+**Total Scripts Standardized**: 48
+**Site-Specific Patterns**: 5 (all with browser rendering/UI interaction)
+**Test Coverage**: 13 reference scripts + 5 site-specific discovery patterns
+**Status**: Production-ready with advanced patterns for JS-heavy sites (tabs, download capture, scroll+filter, browser render, accordion)
