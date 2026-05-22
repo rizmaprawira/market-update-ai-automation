@@ -70,7 +70,7 @@ def main():
     premi_neto_2026, premi_neto_prev = extract_two_numbers(text, "Jumlah Premi Neto")
     hasil_uw_2026, hasil_uw_prev = extract_two_numbers(text, "Hasil Underwriting")
     laba_komp_2026, laba_komp_prev = extract_two_numbers(text, "Total Laba (Rugi) Komprehensif")
-    solv_2026, solv_prev = extract_two_numbers(text, "D. Rasio Pencapaian (%)")
+    solv_2026, solv_prev = extract_two_numbers(text, "D. Rasio Pencapaian (%) *)")
     lik_2026, lik_prev = extract_two_numbers(text, "b. Rasio Likuiditas (%)")
 
     current_period = f"{args.yyyy}-{args.mm:02d}"

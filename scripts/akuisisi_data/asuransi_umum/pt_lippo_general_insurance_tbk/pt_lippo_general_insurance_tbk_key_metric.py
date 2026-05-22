@@ -35,13 +35,13 @@ def main():
     text = re.sub(r"\s+", " ", text)
 
     aset_2026, aset_prev = extract_two_numbers(text, "35 Jumlah Aset")
-    ekuitas_2026, ekuitas_prev = extract_two_numbers(text, "20 Jumlah Ekuitas")
+    ekuitas_2026, ekuitas_prev = extract_two_numbers(text, "21 Jumlah Ekuitas")
     pend_premi_2026, pend_premi_prev = extract_two_numbers(text, "9 Jumlah Pendapatan Premi Neto")
     premi_bruto_2026, premi_bruto_prev = extract_two_numbers(text, "3 Jumlah Premi Bruto")
     premi_reasu_2026, premi_reasu_prev = extract_two_numbers(text, "5 Jumlah Premi Reasuransi")
     premi_neto_2026, premi_neto_prev = extract_two_numbers(text, "6 Jumlah Premi Neto")
     hasil_uw_2026, hasil_uw_prev = extract_two_numbers(text, "16 HASIL UNDERWRITING")
-    laba_komp_2026, laba_komp_prev = extract_two_numbers(text, "Total Laba")
+    laba_komp_2026, laba_komp_prev = extract_two_numbers(text, "26 Total Laba Komprehensif")
     solv_2026, solv_prev = extract_two_numbers(text, "Rasio Pencapaian")
     lik_2026, lik_prev = extract_two_numbers(text, "Rasio Likuiditas")
 
