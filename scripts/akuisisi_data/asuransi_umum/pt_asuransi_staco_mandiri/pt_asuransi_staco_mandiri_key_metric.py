@@ -36,7 +36,7 @@ def main():
 
     aset_2026, aset_prev = extract_two_numbers(text, "34 Jumlah Aset")
     ekuitas_2026, ekuitas_prev = extract_two_numbers(text, "20 Jumlah Ekuitas")
-    pend_premi_2026, pend_premi_prev = extract_two_numbers(text, "9 Jumlah Pendapatan Premi Neto")
+    pend_premi_2026, pend_premi_prev = extract_two_numbers(text, "2 Jumlah Pendapatan Premi")
     premi_bruto_2026, premi_bruto_prev = extract_two_numbers(text, "3 Jumlah Premi Bruto")
     premi_reasu_2026, premi_reasu_prev = extract_two_numbers(text, "5 Jumlah Premi Reasuransi")
     premi_neto_2026, premi_neto_prev = extract_two_numbers(text, "6 Jumlah Premi Netto")
