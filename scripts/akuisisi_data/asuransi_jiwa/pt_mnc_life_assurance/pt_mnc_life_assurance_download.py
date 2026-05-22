@@ -8,7 +8,7 @@ from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _downloader_base import (
-    build_session, download_pdf, write_manifest, write_debug_html, current_timestamp
+    write_manifest, write_debug_html, current_timestamp
 )
 
 LOGGER = logging.getLogger("download_pt_mnc_life_assurance")
