@@ -3,11 +3,14 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _downloader_base import (
-    build_session, extract_pdf_links, download_pdf, write_manifest, write_debug_html,
-    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp
+    build_session, download_pdf, write_manifest, write_debug_html,
+    fetch_html_static, fetch_html_browser, fetch_html_browser_domready, fetch_html_with_smart_fallback, current_timestamp,
+    normalize_text, matches_target_period, score_candidate, MONTH_LABELS, PDFCandidate
 )
 
 LOGGER = logging.getLogger("download_pt_panin_dai-chi_life")
@@ -15,6 +18,37 @@ SOURCE_URL = "https://www.panindai-ichilife.co.id/id/laporan-keuangan"
 COMPANY_ID = "pt_panin_dai-chi_life"
 COMPANY_NAME = "PT Panin Dai-Chi Life"
 CATEGORY = "asuransi_jiwa"
+
+def extract_pdf_links(html, base_url, year, month):
+    import re
+    soup = BeautifulSoup(html, 'html.parser')
+    candidates = []
+
+    for link in soup.find_all('a'):
+        href = link.get('href', '').strip()
+        if not href or href.startswith("javascript:") or href.startswith("#"):
+            continue
+
+        text = link.get_text(strip=True)
+        if text.lower() != "download pdf":
+            continue
+
+        parent_text = ""
+        if link.parent:
+            parent_text = link.parent.get_text(" ", strip=True)
+
+        blob_text = " ".join(part for part in [text, parent_text, href] if part)
+        blob = normalize_text(blob_text)
+        url = urljoin(base_url, href)
+
+        if not (str(year) in blob and MONTH_LABELS[month].lower() in blob):
+            continue
+
+        score = score_candidate(blob_text, year, month)
+        score += 50
+        candidates.append(PDFCandidate(url=url, text=text, score=score, discovered_url=base_url))
+
+    return sorted(candidates, key=lambda x: x.score, reverse=True)
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
@@ -52,7 +86,7 @@ def main():
     try:
         if args.use_browser:
             LOGGER.info("Using Playwright browser rendering")
-            html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
+            html, discovered_url = fetch_html_browser_domready(SOURCE_URL, args.timeout, extra_wait_ms=3000)
         else:
             html, discovered_url, used_browser = fetch_html_with_smart_fallback(
                 session, SOURCE_URL, args.year, args.month, args.timeout
@@ -87,7 +121,7 @@ def main():
         }])
         return 1
 
-    pdf_url = candidates[0]
+    pdf_url = candidates[0].url
     LOGGER.info(f"Discovered PDF URL: {pdf_url}")
 
     if args.discover_only:

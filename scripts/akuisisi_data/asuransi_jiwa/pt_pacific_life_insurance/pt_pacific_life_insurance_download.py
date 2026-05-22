@@ -146,11 +146,12 @@ def main():
 
     if output_pdf.exists() and not args.force:
         LOGGER.info(f"PDF already exists at {output_pdf}")
+        file_size = output_pdf.stat().st_size
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": SOURCE_URL,
             "pdf_url": pdf_url, "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "skipped_existing", "reason": "file exists",
+            "output_path": str(output_pdf), "status": "skipped_existing", "reason": f"existing valid PDF kept ({file_size} bytes)",
             "timestamp": current_timestamp()
         }])
         return 0

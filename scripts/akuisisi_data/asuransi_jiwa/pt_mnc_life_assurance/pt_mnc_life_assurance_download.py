@@ -19,7 +19,7 @@ MONTH_NAMES = {
     7: "Juli", 8: "Agustus", 9: "September", 10: "Oktober", 11: "November", 12: "Desember"
 }
 
-def discover_mnc_life_pdf(year: int, month: int, timeout: int = 30):
+def discover_mnc_life_pdf(year: int, month: int, output_pdf: Path, timeout: int = 30):
     """Discover and download PDF by selecting dropdowns and clicking button."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
@@ -112,7 +112,9 @@ def discover_mnc_life_pdf(year: int, month: int, timeout: int = 30):
 
             download = download_info.value
             LOGGER.info(f"PDF download captured: {download.suggested_filename}")
-            return download
+            output_pdf.parent.mkdir(parents=True, exist_ok=True)
+            download.save_as(output_pdf)
+            return output_pdf
 
         except Exception as e:
             LOGGER.error(f"Error during discovery: {str(e)}")
@@ -148,29 +150,15 @@ def main():
     LOGGER.info(f"Discovering PDF from {SOURCE_URL} (year={args.year}, month={args.month})")
 
     try:
-        download = discover_mnc_life_pdf(args.year, args.month, timeout=args.timeout)
-
-        if not download:
-            reason = "failed to download PDF (dropdown selection or button click failed)"
-            LOGGER.warning(reason)
-            write_manifest(output_dir, [{
-                "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
-                "source_page_url": SOURCE_URL, "discovered_page_url": SOURCE_URL,
-                "pdf_url": "", "target_year": args.year, "target_month": args.month,
-                "output_path": str(output_pdf), "status": "not_found", "reason": reason,
-                "timestamp": current_timestamp()
-            }])
-            return 1
-
-        LOGGER.info(f"PDF discovered via Playwright dropdown interaction")
-
-        if args.discover_only:
-            LOGGER.info("Discover-only mode: stopping after discovery")
+        if output_pdf.exists() and not args.force:
+            LOGGER.info(f"PDF already exists at {output_pdf}")
+            file_size = output_pdf.stat().st_size
             write_manifest(output_dir, [{
                 "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
                 "source_page_url": SOURCE_URL, "discovered_page_url": SOURCE_URL,
                 "pdf_url": "(downloaded via Playwright)", "target_year": args.year, "target_month": args.month,
-                "output_path": str(output_pdf), "status": "discover_only", "reason": "discover-only mode",
+                "output_path": str(output_pdf), "status": "skipped_existing",
+                "reason": f"existing valid PDF kept ({file_size} bytes)",
                 "timestamp": current_timestamp()
             }])
             return 0
@@ -186,22 +174,31 @@ def main():
             }])
             return 0
 
-        output_dir.mkdir(parents=True, exist_ok=True)
+        download_result = discover_mnc_life_pdf(args.year, args.month, output_pdf, timeout=args.timeout)
 
-        if output_pdf.exists() and not args.force:
-            LOGGER.info(f"PDF already exists at {output_pdf}")
-            file_size = output_pdf.stat().st_size
+        if not download_result:
+            reason = "failed to download PDF (dropdown selection or button click failed)"
+            LOGGER.warning(reason)
+            write_manifest(output_dir, [{
+                "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
+                "source_page_url": SOURCE_URL, "discovered_page_url": SOURCE_URL,
+                "pdf_url": "", "target_year": args.year, "target_month": args.month,
+                "output_path": str(output_pdf), "status": "not_found", "reason": reason,
+                "timestamp": current_timestamp()
+            }])
+            return 1
+
+        if args.discover_only:
+            LOGGER.info("Discover-only mode: stopping after discovery")
             write_manifest(output_dir, [{
                 "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
                 "source_page_url": SOURCE_URL, "discovered_page_url": SOURCE_URL,
                 "pdf_url": "(downloaded via Playwright)", "target_year": args.year, "target_month": args.month,
-                "output_path": str(output_pdf), "status": "skipped_existing",
-                "reason": f"existing valid PDF kept ({file_size} bytes)",
+                "output_path": str(output_pdf), "status": "discover_only", "reason": "discover-only mode",
                 "timestamp": current_timestamp()
             }])
             return 0
 
-        download.save_as(output_pdf)
         file_size = output_pdf.stat().st_size
         LOGGER.info(f"Successfully downloaded to {output_pdf} ({file_size} bytes)")
 

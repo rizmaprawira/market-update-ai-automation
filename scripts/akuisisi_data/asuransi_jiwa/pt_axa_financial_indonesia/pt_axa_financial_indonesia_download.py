@@ -1,4 +1,4 @@
-"""Download financial reports for PT Asuransi Allianz Utama Indonesia."""
+"""Download financial reports for PT AXA Financial Indonesia."""
 import argparse
 import logging
 import sys
@@ -33,7 +33,11 @@ def main():
     args = parser.parse_args()
     
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
-    
+
+    if not args.year or not args.month:
+        LOGGER.error("Year and month are required (use --year/--yyyy and --month/--mm)")
+        return 1
+
     if not 1 <= args.month <= 12:
         LOGGER.error("Month must be 1-12")
         return 1
@@ -123,20 +127,26 @@ def main():
     http_status, file_size = download_pdf(
         session, selected_candidate.url, output_pdf, timeout=args.timeout, force=args.force
     )
-    
+
+    if http_status is not None:
+        status = "downloaded"
+        reason = f"HTTP {http_status} ({file_size} bytes)"
+        LOGGER.info(f"Successfully downloaded to {output_pdf}")
+        success = True
+    else:
+        status = "skipped_existing"
+        reason = f"existing valid PDF kept ({file_size} bytes)"
+        LOGGER.info(f"PDF already exists and is valid: {output_pdf}")
+        success = True
+
     write_manifest(output_dir, [{
         "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
         "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
         "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
-        "output_path": str(output_pdf), "status": "downloaded" if success else "failed",
-        "reason": reason, "timestamp": current_timestamp()
+        "output_path": str(output_pdf), "status": status, "reason": reason,
+        "timestamp": current_timestamp()
     }])
-    
-    if success:
-        LOGGER.info(f"Successfully downloaded to {output_pdf}")
-    else:
-        LOGGER.error(f"Failed to download: {reason}")
-    
+
     return 0 if success else 1
 
 if __name__ == "__main__":

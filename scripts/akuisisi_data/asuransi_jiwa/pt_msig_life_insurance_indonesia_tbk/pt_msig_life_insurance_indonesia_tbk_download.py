@@ -1,4 +1,4 @@
-"""Download financial reports for PT Asuransi Allianz Utama Indonesia."""
+"""Download financial reports for PT MSIG Life Insurance Indonesia Tbk."""
 import argparse
 import logging
 import sys
@@ -8,12 +8,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _downloader_base import (
     build_session, extract_pdf_links, download_pdf, write_manifest, write_debug_html,
-    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp
+    fetch_html_static, fetch_html_browser_domready, fetch_html_with_smart_fallback, current_timestamp
 )
 
-LOGGER = logging.getLogger("download_pt_msig_life_insurance_indonesia_tbk.")
+LOGGER = logging.getLogger("download_pt_msig_life_insurance_indonesia_tbk")
 SOURCE_URL = "https://www.msiglife.co.id/tentang-kami/laporan-keuangan"
-COMPANY_ID = "pt_msig_life_insurance_indonesia_tbk."
+COMPANY_ID = "pt_msig_life_insurance_indonesia_tbk"
 COMPANY_NAME = "PT MSIG Life Insurance Indonesia Tbk."
 CATEGORY = "asuransi_jiwa"
 
@@ -33,7 +33,11 @@ def main():
     args = parser.parse_args()
     
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
-    
+
+    if not args.year or not args.month:
+        LOGGER.error("Year and month are required (use --year/--yyyy and --month/--mm)")
+        return 1
+
     if not 1 <= args.month <= 12:
         LOGGER.error("Month must be 1-12")
         return 1
@@ -45,15 +49,10 @@ def main():
     debug_dir = output_dir / "_debug_html"
     
     LOGGER.info(f"Fetching from {SOURCE_URL}")
-    
+
     try:
-        if args.use_browser:
-            LOGGER.info("Using Playwright browser rendering")
-            html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
-        else:
-            html, discovered_url, used_browser = fetch_html_with_smart_fallback(
-                session, SOURCE_URL, args.year, args.month, args.timeout
-            )
+        LOGGER.info("Using fast DOM-ready rendering with 20s AJAX wait for JavaScript to load PDF links")
+        html, discovered_url = fetch_html_browser_domready(SOURCE_URL, args.timeout, extra_wait_ms=20000)
     except Exception as e:
         reason = f"failed to fetch: {e}"
         LOGGER.error(reason)
@@ -123,20 +122,26 @@ def main():
     http_status, file_size = download_pdf(
         session, selected_candidate.url, output_pdf, timeout=args.timeout, force=args.force
     )
-    
+
+    if http_status is not None:
+        status = "downloaded"
+        reason = f"HTTP {http_status} ({file_size} bytes)"
+        LOGGER.info(f"Successfully downloaded to {output_pdf}")
+        success = True
+    else:
+        status = "skipped_existing"
+        reason = f"existing valid PDF kept ({file_size} bytes)"
+        LOGGER.info(f"PDF already exists and is valid: {output_pdf}")
+        success = True
+
     write_manifest(output_dir, [{
         "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
         "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
         "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
-        "output_path": str(output_pdf), "status": "downloaded" if success else "failed",
-        "reason": reason, "timestamp": current_timestamp()
+        "output_path": str(output_pdf), "status": status, "reason": reason,
+        "timestamp": current_timestamp()
     }])
-    
-    if success:
-        LOGGER.info(f"Successfully downloaded to {output_pdf}")
-    else:
-        LOGGER.error(f"Failed to download: {reason}")
-    
+
     return 0 if success else 1
 
 if __name__ == "__main__":

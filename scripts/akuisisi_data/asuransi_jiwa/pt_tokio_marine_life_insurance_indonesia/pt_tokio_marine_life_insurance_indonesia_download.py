@@ -1,4 +1,4 @@
-"""Download financial reports for PT Asuransi Allianz Utama Indonesia."""
+"""Download financial reports for PT Tokio Marine Life Insurance Indonesia."""
 import argparse
 import logging
 import sys
@@ -123,21 +123,27 @@ def main():
     http_status, file_size = download_pdf(
         session, selected_candidate.url, output_pdf, timeout=args.timeout, force=args.force
     )
-    
+
+    status = "downloaded" if http_status is not None else "skipped_existing"
+    reason = (
+        f"HTTP {http_status} ({file_size} bytes)"
+        if http_status is not None
+        else f"existing valid PDF kept ({file_size} bytes)"
+    )
+
     write_manifest(output_dir, [{
         "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
         "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
         "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
-        "output_path": str(output_pdf), "status": "downloaded" if success else "failed",
-        "reason": reason, "timestamp": current_timestamp()
+        "output_path": str(output_pdf), "status": status, "reason": reason, "timestamp": current_timestamp()
     }])
-    
-    if success:
-        LOGGER.info(f"Successfully downloaded to {output_pdf}")
+
+    if http_status is not None:
+        LOGGER.info(f"Successfully downloaded to {output_pdf}: {reason}")
     else:
-        LOGGER.error(f"Failed to download: {reason}")
-    
-    return 0 if success else 1
+        LOGGER.info(f"File already exists: {reason}")
+
+    return 0
 
 if __name__ == "__main__":
     sys.exit(main())

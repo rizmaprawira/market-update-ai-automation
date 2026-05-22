@@ -187,9 +187,46 @@ def matches_target_period(text, year, month):
     blob = normalize_text(text)
     if not blob:
         return False
-    month_hit = any(re.search(rf'(?<![a-z]){re.escape(term)}(?![a-z])', blob) for term in month_terms(month))
+    month_hit = False
+    for term in month_terms(month):
+        if term.isdigit():
+            # For numeric month terms, only match if preceded by month-related keywords
+            # or if it's the first match and there's "bulan" or "laporan" nearby
+            # This avoids matching "04" in URL paths like "/uploads/2026/04/"
+            patterns = [
+                rf'bulan\s+{re.escape(term)}\b',  # "bulan 04" or "bulan 4"
+                rf'bulan ke\s*{re.escape(term)}\b',  # "bulan ke 4"
+                rf'month\s+{re.escape(term)}\b',  # "month 04"
+                rf'{re.escape(term)}\s+(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)',  # "04 april"
+            ]
+            for pattern in patterns:
+                if re.search(pattern, blob):
+                    month_hit = True
+                    break
+        else:
+            # For text terms, require letter boundaries
+            pattern = rf'(?<![a-z]){re.escape(term)}(?![a-z])'
+            if re.search(pattern, blob):
+                month_hit = True
+                break
+        if month_hit:
+            break
     year_hit = re.search(rf'(?<!\d){year}(?!\d)', blob) is not None
-    return month_hit and year_hit
+
+    # If month matches and year also matches, accept
+    if month_hit and year_hit:
+        return True
+    # If month name matches (not numeric) and year also matches, accept
+    # (even without "laporan" or "keuangan" in some cases)
+    if month_hit and year_hit:
+        return True
+    # If month matches and it looks like a financial report, accept even without year
+    # (only if no other years present that would contradict this)
+    if month_hit and ("laporan" in blob or "keuangan" in blob or "financial" in blob):
+        other_years = re.findall(r'\b(20\d{2})\b', blob)
+        if not other_years or all(int(y) == year for y in other_years):
+            return True
+    return False
 
 def score_candidate(text, year, month):
     blob = normalize_text(text)
@@ -231,8 +268,10 @@ def extract_pdf_links(html, base_url, year, month):
             continue
         if _looks_syariah_only(normalized_link):
             continue
-        
-        if matches_target_period(blob_text + " " + url, year, month):
+
+        # Check period match using only the link text and URL, not parent context
+        # (parent context is often a menu with all dates, causing false matches)
+        if matches_target_period(link_blob + " " + url, year, month):
             score = score_candidate(blob_text + " " + url, year, month)
             if _has_any_term(normalized_link, CONVENTIONAL_TERMS):
                 score += 10

@@ -1,4 +1,4 @@
-"""Download financial reports for PT Asuransi Allianz Utama Indonesia."""
+"""Download financial reports for PT Asuransi Jiwa BCA."""
 import argparse
 import logging
 import sys
@@ -18,9 +18,15 @@ COMPANY_ID = "pt_asuransi_jiwa_bca"
 COMPANY_NAME = "PT Asuransi Jiwa BCA"
 CATEGORY = "asuransi_jiwa"
 
+MONTH_NAMES_ID = {
+    1: "januari", 2: "februari", 3: "maret", 4: "april",
+    5: "mei", 6: "juni", 7: "juli", 8: "agustus",
+    9: "september", 10: "oktober", 11: "november", 12: "desember"
+}
+
 def build_bca_report_url(year, month):
-    """Build direct URL to BCA Life month-specific report page."""
-    month_name_id = month_name[month].lower()
+    """Build direct URL to BCA Life month-specific report page (using Indonesian month names)."""
+    month_name_id = MONTH_NAMES_ID.get(month, "")
     return f"https://www.bcalife.co.id/tentang-kami/laporan-keuangan/{year}/laporan-keuangan-bca-life-{month_name_id}-{year}"
 
 def main():
@@ -39,7 +45,11 @@ def main():
     args = parser.parse_args()
     
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
-    
+
+    if not args.year or not args.month:
+        LOGGER.error("Year and month are required (use --year/--yyyy and --month/--mm)")
+        return 1
+
     if not 1 <= args.month <= 12:
         LOGGER.error("Month must be 1-12")
         return 1
@@ -90,7 +100,18 @@ def main():
     
     selected_candidate = candidates[0]
     LOGGER.info(f"Selected: {selected_candidate.text[:60]}")
-    
+
+    if args.discover_only:
+        LOGGER.info("Discover-only mode: stopping after discovery")
+        write_manifest(output_dir, [{
+            "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
+            "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
+            "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+            "output_path": str(output_pdf), "status": "discover_only", "reason": "discover-only mode",
+            "timestamp": current_timestamp()
+        }])
+        return 0
+
     if args.dry_run:
         LOGGER.info(f"Dry-run: would download from {selected_candidate.url}")
         write_manifest(output_dir, [{

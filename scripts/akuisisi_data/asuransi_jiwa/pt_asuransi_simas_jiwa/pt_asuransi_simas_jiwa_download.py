@@ -1,4 +1,4 @@
-"""Download financial reports for PT Asuransi Allianz Utama Indonesia."""
+"""Download financial reports for PT Asuransi Simas Jiwa."""
 import argparse
 import logging
 import sys
@@ -19,10 +19,8 @@ CATEGORY = "asuransi_jiwa"
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
-    parser.add_argument("--year", type=int, required=True, help="Target year")
-    parser.add_argument("--yyyy", dest="year", type=int, help="Target year (alias for --year)")
-    parser.add_argument("--month", type=int, help="Target month (1-12)")
-    parser.add_argument("--mm", dest="month", type=int, help="Target month 1-12 (alias for --month)")
+    parser.add_argument("--year", "--yyyy", dest="year", type=int, required=True, help="Target year")
+    parser.add_argument("--month", "--mm", dest="month", type=int, required=True, help="Target month (1-12)")
     parser.add_argument("--output-root", type=Path, default=Path("data"))
     parser.add_argument("--dry-run", action="store_true", help="Discovery only, no download")
     parser.add_argument("--discover-only", action="store_true", help="Stop after discovery, return 0")
@@ -31,11 +29,11 @@ def main():
     parser.add_argument("--debug-html", action="store_true", help="Save debug HTML on failure")
     parser.add_argument("--timeout", type=int, default=30, help="HTTP timeout in seconds")
     args = parser.parse_args()
-    
+
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
-    
-    if not 1 <= args.month <= 12:
-        LOGGER.error("Month must be 1-12")
+
+    if not args.year or not args.month or not 1 <= args.month <= 12:
+        LOGGER.error("Year and month are required; month must be 1-12")
         return 1
     
     session = build_session()
@@ -123,21 +121,28 @@ def main():
     http_status, file_size = download_pdf(
         session, selected_candidate.url, output_pdf, timeout=args.timeout, force=args.force
     )
-    
+
+    status = "downloaded" if http_status is not None else "skipped_existing"
+    reason = (
+        f"HTTP {http_status} ({file_size} bytes)"
+        if http_status is not None
+        else f"existing valid PDF kept ({file_size} bytes)"
+    )
+
     write_manifest(output_dir, [{
         "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
         "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
         "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
-        "output_path": str(output_pdf), "status": "downloaded" if success else "failed",
-        "reason": reason, "timestamp": current_timestamp()
+        "output_path": str(output_pdf), "status": status, "reason": reason,
+        "timestamp": current_timestamp()
     }])
-    
-    if success:
+
+    if http_status is not None:
         LOGGER.info(f"Successfully downloaded to {output_pdf}")
     else:
-        LOGGER.error(f"Failed to download: {reason}")
-    
-    return 0 if success else 1
+        LOGGER.info(f"Existing PDF kept at {output_pdf}")
+
+    return 0
 
 if __name__ == "__main__":
     sys.exit(main())

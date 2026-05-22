@@ -33,7 +33,7 @@ def discover_perta_life_pdf(year: int, month: int, timeout: int = 30) -> str:
             browser = p.chromium.launch()
             page = browser.new_page()
             page.goto(SOURCE_URL, timeout=timeout * 1000, wait_until="domcontentloaded")
-            time.sleep(2)
+            page.wait_for_timeout(2000)
 
             # Scroll to reveal dropdown
             for _ in range(3):
@@ -101,8 +101,8 @@ def main():
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 
-    if not args.year or not args.month or not 1 <= args.month <= 12:
-        LOGGER.error("Year and month (1-12) required")
+    if not args.year or not args.month or not (1 <= args.month <= 12):
+        LOGGER.error("Year and month (1-12) are required")
         return 1
     
     session = build_session()
@@ -174,16 +174,38 @@ def main():
         }])
         return 0
 
-    http_status, file_size = download_pdf(
-        session, pdf_url, output_pdf, timeout=args.timeout, force=args.force
-    )
-
-    status = "downloaded" if http_status is not None else "skipped_existing"
-    reason = (
-        f"HTTP {http_status} ({file_size} bytes)"
-        if http_status is not None
-        else f"existing valid PDF kept ({file_size} bytes)"
-    )
+    try:
+        http_status, file_size = download_pdf(
+            session, pdf_url, output_pdf, timeout=args.timeout, force=args.force
+        )
+        status = "downloaded" if http_status is not None else "skipped_existing"
+        reason = (
+            f"HTTP {http_status} ({file_size} bytes)"
+            if http_status is not None
+            else f"existing valid PDF kept ({file_size} bytes)"
+        )
+    except Exception as e:
+        LOGGER.warning(f"Direct download failed ({e}), trying Playwright fetch")
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch()
+                page = browser.new_page()
+                response = page.goto(pdf_url, timeout=args.timeout * 1000, wait_until="commit")
+                page.wait_for_timeout(2000)
+                pdf_bytes = page.pdf()
+                output_pdf.parent.mkdir(parents=True, exist_ok=True)
+                output_pdf.write_bytes(pdf_bytes)
+                file_size = len(pdf_bytes)
+                browser.close()
+                status = "downloaded"
+                reason = f"Playwright PDF export ({file_size} bytes)"
+                http_status = 200
+        except Exception as e2:
+            LOGGER.error(f"Playwright fetch failed: {e2}")
+            status = "error"
+            reason = f"Failed to download via HTTP and Playwright: {e2}"
+            http_status = None
+            file_size = 0
 
     write_manifest(output_dir, [{
         "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
@@ -193,12 +215,15 @@ def main():
         "timestamp": current_timestamp()
     }])
 
-    if status == "downloaded":
+    if http_status is not None and status == "downloaded":
         LOGGER.info(f"Successfully downloaded to {output_pdf}")
         return 0
-    else:
-        LOGGER.info(f"PDF already exists: {output_pdf}")
+    elif status == "skipped_existing":
+        LOGGER.info(f"PDF already exists, keeping cached version")
         return 0
+    else:
+        LOGGER.error(f"Failed to download: {reason}")
+        return 1
 
 if __name__ == "__main__":
     sys.exit(main())
