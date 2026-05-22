@@ -27,7 +27,7 @@ COLUMNS = [
 
 def extract_two_numbers(text: str, keyword: str):
     pattern = re.compile(
-        rf"{re.escape(keyword)}\s*(?:\([^)]*\)\s*)*\*?\s*(\(?[0-9\.,%\-]+\)?)\s+(\(?[0-9\.,%\-]+\)?)",
+        rf"{re.escape(keyword)}\*?\s*(\(?[0-9\.,%\-]+\)?)\s+(\(?[0-9\.,%\-]+\)?)",
         re.IGNORECASE,
     )
     m = pattern.search(text)
