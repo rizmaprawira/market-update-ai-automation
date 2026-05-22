@@ -912,8 +912,302 @@ Benefits vs alternatives:
 
 ---
 
+## 15) Vue Custom Dropdowns + Button Click: PT MNC Life Assurance (2026-05-22)
+
+**Problem:** PT MNC Life script couldn't discover financial reports
+- Website uses Nuxt/Vue with custom dropdown components (not standard HTML `<select>`)
+- Page structure: "Laporan Keuangan Bulanan" section with 2 dropdowns: "Pilih Tahun" and "Pilih Bulan"
+- Generic extraction returns empty (dropdowns are Vue components, not visible in static HTML)
+- Download button requires year + month selection before click
+
+**Root Cause:**
+- Custom Vue dropdown components don't render as HTML `<select>` elements
+- Page needs JavaScript to render dropdowns
+- Clicking button without selecting year/month either does nothing or triggers timeout
+- Button click triggers browser download event (capturable with `expect_download()`)
+
+**Solution: Interactive Dropdown Selection + Download Capture**
+
+Implemented `discover_mnc_life_pdf(year, month, timeout)` function:
+
+```python
+# 1. Load page with Playwright + networkidle (wait for JS to execute)
+page.goto(SOURCE_URL, wait_until="networkidle")
+page.wait_for_timeout(2500)
+
+# 2. Scroll ke bawah to reveal report section
+for _ in range(5):
+    page.evaluate("window.scrollBy(0, 600)")
+    page.wait_for_timeout(300)
+
+# 3. Find "Laporan Keuangan Bulanan" section via h4 text
+sections = page.query_selector_all(".section-file")
+for section in sections:
+    if "Bulanan" in section.query_selector("h4").inner_text():
+        bulanan_section = section
+        break
+
+# 4. Click first dropdown (year)
+dropdowns = bulanan_section.query_selector_all(".dropdown-file")
+dropdowns[0].click()
+page.wait_for_timeout(700)
+
+# 5. Find year option by text and click it
+for el in page.query_selector_all("p, span, div"):
+    if el.inner_text().strip() == str(year):
+        el.click()
+        break
+
+page.keyboard.press("Escape")  # Close dropdown
+
+# 6. Same process for month dropdown
+dropdowns[1].click(force=True)  # force=True to bypass element interception
+page.wait_for_timeout(700)
+
+for el in page.query_selector_all("p, span, div"):
+    if el.inner_text().strip() == MONTH_NAMES[month]:
+        el.click()
+        break
+
+page.keyboard.press("Escape")
+
+# 7. Click button and capture download
+button = bulanan_section.query_selector("button")
+with page.expect_download(timeout=timeout*1000) as dl_info:
+    button.click()
+    page.wait_for_timeout(2000)
+
+download = dl_info.value  # Returns Download object
+```
+
+**Test Results (2026-03):**
+- ✓ Year selection: 2026 found and selected
+- ✓ Month selection: Maret (March) found and selected  
+- ✓ Download captured: "Laporan Keuangan Bulan Maret Tahun 2026.pdf" (210.6 KB, HTTP 200 ✓)
+- ✓ Manifest: Correct status enum and path
+- ✓ All modes: `--discover-only`, `--dry-run`, full download working
+
+**Key Implementation Details:**
+
+1. **networkidle wait crucial:**
+   - Static page load not enough - needs JS to render Vue components
+   - `wait_until="networkidle"` ensures dropdowns exist in DOM before clicking
+
+2. **Text-based element selection:**
+   - Can't use standard select_option() (custom Vue component, not HTML select)
+   - Instead: find all p/span/div elements, match by inner text, click
+   - Avoids needing to know exact CSS class/id selectors
+
+3. **force=True for second dropdown:**
+   - Sticky header may intercept click on second dropdown
+   - `click(force=True)` bypasses element interception checks
+   - Alternative: scroll element into view before clicking
+
+4. **Escape key to close dropdowns:**
+   - Each dropdown auto-closes after selection
+   - Pressing Escape ensures clean state before next action
+   - Prevents modal/overlay conflicts
+
+5. **expect_download() works after button click:**
+   - Button click triggers browser download event
+   - Captured via Playwright's expect_download context manager
+   - Returns Download object with save_as() method
+
+**When to Use This Pattern:**
+
+Use Vue/custom dropdown + button click when:
+- Site uses modern JS framework (Vue, React, Angular) instead of standard HTML forms
+- Dropdowns are custom components, not HTML `<select>`
+- Page requires multi-step selection before action
+- Final action is button click that triggers download (or navigation)
+
+Benefits vs alternatives:
+- ✓ Works for any custom component with visible text labels
+- ✓ No need to inspect CSS classes or data attributes
+- ✓ Robust across framework updates (relies on text, not HTML structure)
+- ✗ Slightly slower than URL extraction (4-5s vs <1s)
+- ✗ Requires Playwright (not pure HTTP)
+
+**Comparison with All Site-Specific Patterns:**
+
+| Company | Pattern | Type | Speed | Reliability |
+|---------|---------|------|-------|-------------|
+| Bhinneka Life | Tab/accordion clicks | UI Automation | 5s | Very high |
+| Central Asia (Jagadiri) | Playwright download capture | Download Capture | 5s | Very high |
+| Great Eastern | Scroll + period filter | Scroll + Filter | 5s | Very high |
+| Indolife | Browser rendering + period filter | Browser Render | 3s | Very high |
+| Heksa Solution | Accordion + Google Drive | Accordion + Drive | 5s | Very high |
+| Lippo Life | Tab + button click | UI Automation | 4s | Very high |
+| **MNC Life** | **Vue dropdown selection + button** | **UI Automation** | **4s** | **Very high** |
+| Generic Sites | Static extraction | Static Parse | <100ms | Medium |
+
+---
+
 **Last Updated**: 2026-05-22
 **Total Scripts Standardized**: 48
-**Site-Specific Patterns**: 7 (Bhinneka, Jagadiri, Great Eastern, Indolife, Heksa, Lippo, MSIG Life)
-**Test Coverage**: 15 reference scripts + 7 site-specific discovery patterns
-**Status**: Production-ready with advanced UI automation (tabs, dropdowns, download capture, scroll+filter, browser render, accordion, Google Drive conversion)
+**Site-Specific Patterns**: 8 (Bhinneka, Jagadiri, Great Eastern, Indolife, Heksa, Lippo, MSIG Life, MNC Life)
+**Test Coverage**: 16 reference scripts + 8 site-specific discovery patterns
+**Status**: Production-ready with advanced UI automation (tabs, dropdowns, download capture, scroll+filter, browser render, accordion, Google Drive conversion, Vue components)
+
+## 16) Dropdown Navigation + File Path Extraction: PT Pacific Life Insurance (2026-05-22)
+
+**Problem:** PT Pacific Life script failed to discover PDFs using generic extraction
+- Website displays financial reports through 3 interactive dropdowns
+- Dropdowns: Report Type ("Laporan Keuangan"), Year (2026, 2025, etc.), and File/Month (dinamis berdasarkan selection)
+- No direct PDF links in HTML - must select dropdowns to reveal file options
+- File options contain relative paths that need to be converted to full URLs
+
+**Root Cause:**
+- Website uses JavaScript to populate dropdown options dynamically
+- File/Month dropdown only shows options after Report Type and Year are selected
+- Option values are relative file paths (e.g., `files/Lap Keu/2026/03. Laporan Keuangan Maret 2026 PLI-Website.pdf`)
+- Static HTML parsing returns empty (need interactive selection)
+
+**Solution: Playwright Dropdown Navigation + Path Extraction**
+
+Implemented `discover_pacific_life_pdf(year, month, timeout=30)` function:
+
+```python
+def discover_pacific_life_pdf(year: int, month: int, timeout: int = 30) -> str:
+    """Discover PDF URL by selecting dropdowns and extracting file path."""
+    month_name = MONTH_NAMES[month]
+    target_month_text = month_name  # e.g., "Maret" for March
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            page = browser.new_page()
+            page.goto(SOURCE_URL, timeout=timeout * 1000, wait_until="domcontentloaded")
+            time.sleep(1)
+
+            # Select "Laporan Keuangan" from report type dropdown
+            page.select_option("#financial_reports_type_selector", "Laporan Keuangan")
+            time.sleep(0.5)
+
+            # Select year from year dropdown
+            page.select_option("#financial_reports_year_selector", str(year))
+            time.sleep(1)
+
+            # Get the rendered HTML to find the matching month option
+            html = page.content()
+            soup = BeautifulSoup(html, "html.parser")
+
+            # Find the file dropdown and look for the month that matches
+            file_select = soup.find('select', id='financial_report_detail_types')
+            if not file_select:
+                browser.close()
+                return None
+
+            options = file_select.find_all('option')
+            target_file_path = None
+
+            for opt in options:
+                text = opt.get_text(strip=True)
+                value = opt.get('value', '')
+
+                # Match the month name in the option text
+                if target_month_text in text and str(year) in value:
+                    target_file_path = value
+                    break
+
+            browser.close()
+
+            if not target_file_path or target_file_path == "None":
+                return None
+
+            # Construct the full URL
+            pdf_url = f"https://www.pacificlife.co.id/{target_file_path}"
+            return pdf_url
+
+    except Exception as e:
+        LOGGER.warning(f"Failed to discover via Playwright: {e}")
+        return None
+```
+
+**Why This Works:**
+- Playwright's `select_option()` allows programmatic dropdown manipulation
+- After selecting dropdowns, HTML is re-rendered with new options
+- File/Month options are populated dynamically (BeautifulSoup can then parse them)
+- Option values are relative paths that can be easily converted to full URLs
+- No need for download capture or button clicking - just extract the path
+
+**Integration into Main Flow:**
+- Call site-specific discovery to navigate dropdowns
+- Extract file path from option value
+- Construct full URL by prepending base domain
+- Download via HTTP (not browser)
+
+**Test Results (2026-03, 2026-02, 2026-04):**
+- ✓ **2026-03**: Found "Maret" option → 218 KB PDF, HTTP 200
+- ✓ **2026-02**: Found "Februari" option → correct February report
+- ✓ **2026-04**: Found "April" option → correct April report
+- ✓ All modes: `--discover-only`, `--dry-run`, full download working
+- ✓ Manifest: Proper status enum, correct filenames, accurate periods
+
+**Key Implementation Details:**
+
+1. **Month name mapping (Indonesian):**
+   ```python
+   MONTH_NAMES = {
+       1: "Januari", 2: "Februari", 3: "Maret", 4: "April", 
+       5: "Mei", 6: "Juni", 7: "Juli", 8: "Agustus", 
+       9: "September", 10: "Oktober", 11: "November", 12: "Desember"
+   }
+   ```
+
+2. **Argument parsing fixed:**
+   ```python
+   parser.add_argument("--year", "--yyyy", dest="year", type=int, required=True)
+   parser.add_argument("--month", "--mm", dest="month", type=int, required=True)
+   ```
+
+3. **Download PDF handling fixed:**
+   ```python
+   http_status, file_size = download_pdf(session, pdf_url, output_pdf, ...)
+   status = "downloaded" if http_status is not None else "skipped_existing"
+   reason = f"HTTP {http_status} ({file_size} bytes)" if http_status is not None else ...
+   ```
+
+4. **Always-use strategy (primary discovery):**
+   - Playwright dropdown selection is the primary discovery method
+   - No fallback to generic extraction (dropdowns are essential for this site)
+
+**Pattern Recognition: When to Use This Approach**
+
+Use Playwright dropdown navigation when:
+- Website uses interactive dropdowns to filter content
+- File/Month options are populated dynamically (depend on prior selections)
+- Option values contain file paths or URLs
+- No direct links visible in static HTML
+- Speed acceptable (~4-5s including Playwright startup)
+
+Benefits vs alternatives:
+- ✓ Works for dynamic dropdown filtering
+- ✓ Extracts paths directly from option values (no URL reverse-engineering)
+- ✓ Simpler than button-clicking (just select dropdown options)
+- ✓ More reliable than generic extraction
+- ✗ Requires Playwright
+- ✗ Slower than static extraction
+
+**Comparison with All Site-Specific Patterns (Updated):**
+
+| Company | Pattern | Speed | Reliability | Use Case |
+|---------|---------|-------|-------------|----------|
+| Bhinneka Life | Tab/accordion clicks | 5s | Very high | User interaction needed |
+| Central Asia (Jagadiri) | Playwright download capture | 5s | Very high | Interactive buttons |
+| Great Eastern | Scroll + period filter | 5s | Very high | Multiple periods visible |
+| Indolife Pensiontama | Browser rendering + period filter | 3s | Very high | Browser render |
+| Heksa Solution | Accordion + Google Drive | 5s | Very high | Accordion with external links |
+| Lippo Life | Playwright download capture (click) | 4s | Very high | Clickable report items |
+| Pacific Life | Dropdown selection + path extraction | 4s | Very high | Dropdown filtering |
+| MSIG Life | Tab + dropdown + button | 4s | Very high | Tabbed interface |
+| MNC Life | Vue dropdown selection | 4s | Very high | Vue components |
+| Generic Sites | Static extraction | <100ms | Medium | Simple static pages |
+
+---
+
+**Last Updated**: 2026-05-22
+**Total Scripts Standardized**: 48
+**Site-Specific Patterns**: 9 (Bhinneka, Jagadiri, Great Eastern, Indolife, Heksa, Lippo, Pacific, MSIG, MNC)
+**Test Coverage**: 17 reference scripts + 9 site-specific discovery patterns
+**Status**: Production-ready with advanced UI automation patterns (tabs, dropdowns, download capture ×2, scroll+filter, browser render, accordion, dropdown filtering, Vue components)
