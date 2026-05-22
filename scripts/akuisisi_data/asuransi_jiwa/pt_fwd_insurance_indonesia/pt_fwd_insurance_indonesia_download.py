@@ -75,58 +75,44 @@ def find_fwd_pdf_url(year: int, month: int, timeout: int = 30) -> str:
 
             page.wait_for_timeout(500)
 
-            # Click the dropdown in the bulanan section
+            # Click the month dropdown in the bulanan section (it's the one showing the current month like "April 2026")
             LOGGER.debug("Opening month dropdown...")
-            page.evaluate('''() => {
-                const slides = document.querySelectorAll('[class*="slick-slide"]');
-                for (let slide of slides) {
-                    const title = slide.querySelector('h4');
-                    if (title && title.innerText.includes('bulanan')) {
-                        const dropdown = slide.querySelector('[role="button"][aria-haspopup="listbox"]');
-                        if (dropdown) {
-                            dropdown.click();
-                        }
-                        break;
-                    }
-                }
-            }''')
+            try:
+                all_dropdowns = page.locator("[role='button'][aria-haspopup='listbox']").all()
+                # The month dropdown is index 3 (after language, year, quarter selectors)
+                if len(all_dropdowns) > 3:
+                    month_dropdown = all_dropdowns[3]
+                    month_dropdown.click()
+                    page.wait_for_timeout(1500)
+                else:
+                    LOGGER.warning("Could not find month dropdown")
+                    page.close()
+                    browser.close()
+                    return None
+            except Exception as e:
+                LOGGER.error(f"Failed to click dropdown: {e}")
+                page.close()
+                browser.close()
+                return None
+
+            # Select the target month from dropdown options
+            LOGGER.debug(f"Selecting {month_display}...")
+            month_selected = False
+            try:
+                options = page.locator("[role='option']").all()
+                for opt in options:
+                    if month_display in opt.inner_text():
+                        opt.click()
+                        month_selected = True
+                        LOGGER.debug(f"Successfully selected {month_display}")
+                        break
+            except Exception as e:
+                LOGGER.warning(f"Failed to select month: {e}")
 
             page.wait_for_timeout(2000)
 
-            # Select the target month from dropdown
-            LOGGER.debug(f"Selecting {month_display}...")
-            month_selected = page.evaluate(f'''() => {{
-                const targetMonth = "{month_display}";
-                const options = document.querySelectorAll('[role="option"]');
-
-                // First try exact match
-                for (let opt of options) {{
-                    const text = opt.innerText.trim();
-                    if (text === targetMonth) {{
-                        opt.click();
-                        opt.dispatchEvent(new MouseEvent('click', {{bubbles: true, cancelable: true}}));
-                        return true;
-                    }}
-                }}
-
-                // Fallback: try case-insensitive and flexible matching
-                const monthLower = targetMonth.toLowerCase();
-                for (let opt of options) {{
-                    const text = opt.innerText.trim().toLowerCase();
-                    if (text === monthLower || text.includes(monthLower)) {{
-                        opt.click();
-                        opt.dispatchEvent(new MouseEvent('click', {{bubbles: true, cancelable: true}}));
-                        return true;
-                    }}
-                }}
-
-                return false;
-            }}''')
-
-            if month_selected:
-                LOGGER.debug(f"Successfully selected {month_display}")
-            else:
-                LOGGER.warning(f"Could not select {month_display}, will use available report")
+            if not month_selected:
+                LOGGER.warning(f"Could not select {month_display}, using available report")
 
             page.wait_for_timeout(2000)
 
