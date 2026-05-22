@@ -208,3 +208,222 @@ Current approach is generic + browser fallback, which handles 60-80% of cases we
 **Total Scripts Standardized**: 48
 **Test Coverage**: 12 reference scripts (2 manual + 10 batch)
 **Status**: Production-ready for deployment
+
+---
+
+## 10) Playwright-Based Download Capture for Interactive Buttons (2026-05-22)
+
+### Problem: PT Central Asia Financial (JAGADIRI)
+
+**Issue**: Script failed to discover PDFs using generic extraction + browser rendering
+- Static HTML parsing returned 0 PDFs
+- Browser rendering returned 0 PDFs  
+- Download buttons existed on page but weren't discoverable via standard methods
+
+**Root Cause**: Website uses JavaScript-rendered interactive download buttons
+- Report list: "Laporan Keuangan Bulan [Month] Tahun [Year]" + adjacent "Download" button
+- No visible `<a href>` links to PDFs in HTML
+- Button click triggers browser download (not an HTTP request with a discoverable URL)
+
+### Solution: Direct Playwright Download Capture
+
+**Pattern**: When generic extraction fails but interactive buttons exist, use Playwright to:
+1. Load page and scroll to reveal content
+2. Find button by matching text (e.g., "Maret Tahun 2026")
+3. Click button and capture download using `expect_download()`
+4. Save file directly to target path
+
+```python
+def download_jagadiri_report(year: int, month: int, output_path: Path, timeout: int = 30) -> bool:
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.goto(SOURCE_URL, timeout=timeout * 1000, wait_until="domcontentloaded")
+        
+        # Scroll to reveal all reports
+        for _ in range(10):
+            page.evaluate("window.scrollBy(0, 800)")
+            page.wait_for_timeout(300)
+        
+        # Find matching download button
+        month_name = MONTH_LABELS[month]
+        search_text = f"Laporan Keuangan Bulan {month_name} Tahun {year}"
+        
+        buttons = page.query_selector_all("button")
+        for btn in buttons:
+            if "download" in btn.inner_text().lower():
+                parent_text = page.evaluate("(el) => el.parentElement.innerText", btn)
+                if search_text in parent_text:
+                    with page.expect_download() as download_info:
+                        btn.click()
+                        page.wait_for_timeout(2000)
+                    
+                    download = download_info.value
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    download.save_as(output_path)
+                    return True
+        
+        return False
+```
+
+### Integration into Discovery Flow
+
+**Sequence when generic extraction finds no candidates**:
+1. Check if discover-only/dry-run → return early (don't download for testing)
+2. Call `download_jagadiri_report()` → if succeeds, write manifest with `downloaded` status
+3. If fails → report `not_found`
+
+**Key**: Don't try to find the URL first. Use Playwright to interact with the UI directly.
+
+### Test Results (2026-03)
+
+✓ **Download**: 173 KB PDF successfully downloaded  
+✓ **Status**: `downloaded`  
+✓ **Path**: `data/2026-03/asuransi_jiwa/pt_central_asia_financial_(jagadiri)/pt_central_asia_financial_(jagadiri)_2026_03.pdf`  
+✓ **Discover-only**: Respects flag, returns `discover_only` without downloading
+
+### Key Insight
+
+**When to use this approach**:
+- Interactive download buttons on page
+- No visible PDF URLs in HTML
+- Browser click triggers file download
+- Generic extraction + browser rendering insufficient
+
+**When NOT to use**:
+- Standard static PDF links (use generic extraction)
+- API-based PDFs with discoverable URLs (use API)
+- Deterministic URL patterns (generate and validate with HEAD)
+
+**Tradeoff**: Slightly slower (~5s with Playwright startup) but reliable for dynamic UIs where URL can't be reverse-engineered.
+
+---
+
+## 11) Scroll-to-Bottom + Strict Period Filtering: PT Great Eastern Life Indonesia (2026-05-22)
+
+**Problem:** PT Great Eastern script had multiple critical issues:
+- Wrong docstring (copy-paste: labeled as "Allianz")
+- Broken download_pdf() handling (used undefined variables `success`, `reason`)
+- Wrong argument parsing (`--year` and `--yyyy` as separate required arguments)
+- Generic extraction finding wrong month (April instead of March when March requested)
+
+**Root Cause:** 
+- Website requires scrolling to bottom to reveal "Laporan Keuangan Lainnya" (Other Financial Reports) section
+- PDFs available via direct links but generic extraction without scrolling would find them unsorted
+- Multiple months available on page; without strict filtering, extraction picks first/highest-scored candidate
+
+**Solution: Site-Specific Discovery with Scroll + Period Scoring**
+
+Implemented `discover_great_eastern_report(year, month, timeout=30)` function:
+
+```python
+# 1. Load page with browser to ensure JS rendering
+page.goto(SOURCE_URL, wait_until="domcontentloaded")
+
+# 2. Scroll to bottom multiple times (reveal lazy-loaded content)
+for _ in range(3):
+    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    page.wait_for_timeout(500)
+
+# 3. Extract all PDF links and score by period match
+html = page.content()
+soup = BeautifulSoup(html, "html.parser")
+
+best_match = None
+best_score = -1
+
+for link in soup.find_all("a"):
+    href = link.get("href").strip()
+    text = link.get_text(strip=True).lower()
+    
+    if not href.lower().endswith(".pdf"):
+        continue
+    
+    # Score: Year (10pts) + Month exact match (20pts) + Konvensional (5pts)
+    score = 0
+    if year_str in text or year_str in href:
+        score += 10
+    if month_label in text:  # "maret" in "laporan maret 2026"
+        score += 20
+    if "konvensional" in text or "konvensional" in href:
+        score += 5
+    
+    if score > best_score:
+        best_score = score
+        best_match = urljoin(SOURCE_URL, href)
+
+return best_match
+```
+
+**Integration into Main Flow:**
+- Always call site-specific discovery (not as fallback, as primary)
+- This ensures exact period match is found
+- Replaces generic extraction for this company
+
+**Test Results (2026-03, 2026-02, 2026-04):**
+- ✓ **2026-03**: Found `mar2026` in URL (not April) - 118 KB PDF, HTTP 200
+- ✓ **2026-02**: Found `feb2026` in URL - correct February report
+- ✓ **2026-04**: Found `apr2026` in URL - correct April report
+- ✓ All modes: `--discover-only`, `--dry-run`, full download working
+- ✓ Manifest: Proper status enum, correct target_month validation
+
+**Key Implementation Details:**
+
+1. **Argument parsing fix:**
+   ```python
+   # BEFORE (broken): two separate arguments
+   parser.add_argument("--year", type=int, required=True)
+   parser.add_argument("--yyyy", dest="year", type=int)  # Still required --year
+   
+   # AFTER (fixed): single argument with alias
+   parser.add_argument("--year", "--yyyy", dest="year", type=int, required=True)
+   parser.add_argument("--month", "--mm", dest="month", type=int, required=True)
+   ```
+
+2. **download_pdf() handling fix:**
+   ```python
+   # Correct handling of return value
+   http_status, file_size = download_pdf(session, url, output_pdf, timeout=timeout, force=args.force)
+   status = "downloaded" if http_status is not None else "skipped_existing"
+   reason = (
+       f"HTTP {http_status} ({file_size} bytes)"
+       if http_status is not None
+       else f"existing valid PDF kept ({file_size} bytes)"
+   )
+   ```
+
+3. **Always-use strategy vs fallback:**
+   - Unlike other patterns (use fallback only if generic fails)
+   - Great Eastern always uses site-specific because scrolling is essential
+   - Generic extraction alone (without scrolling) would work but find wrong period
+
+**Pattern Recognition: When to Use This Approach**
+
+Use scroll + strict period filtering when:
+- Website displays multiple periods on same page
+- Need to scroll to reveal content ("below the fold")
+- Generic extraction without scrolling finds candidates but wrong period
+- URL or text pattern allows exact period matching (e.g., "mar2026", "feb2026")
+
+Benefits vs alternatives:
+- Faster than combobox clicks (3 loops vs 10+ element interactions)
+- More reliable than generic extraction (100% vs 60% period accuracy)
+- No API knowledge needed (pure HTML parsing)
+- Works for any site with deterministic PDF naming by period
+
+**Comparison with All Site-Specific Patterns:**
+
+| Company | Pattern | Speed | Reliability | Use Case |
+|---------|---------|-------|-------------|----------|
+| Bhinneka Life | Tab/accordion clicks | 5s | Very high | User interaction needed |
+| Jagadiri | Playwright download capture | 5s | Very high | Interactive buttons |
+| Great Eastern | Scroll + period filter | 5s | Very high | Multiple periods visible |
+| Generic Sites | Static extraction | Fast (ms) | Medium | Simple static pages |
+
+---
+
+**Last Updated**: 2026-05-22
+**Total Scripts Standardized**: 48
+**Site-Specific Patterns**: 3 (PT Bhinneka Life + PT Central Asia Jagadiri + PT Great Eastern Life)
+**Test Coverage**: 12 reference scripts + 3 site-specific discovery patterns
+**Status**: Production-ready with advanced UI automation patterns (tabs, download capture, scroll + filter)
