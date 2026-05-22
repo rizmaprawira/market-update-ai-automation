@@ -35,15 +35,15 @@ def main():
     text = INPUT_TXT.read_text(encoding="utf-8", errors="ignore")
     text = re.sub(r"\s+", " ", text)
 
-    aset_2026, aset_prev = extract_two_numbers(text, "32 Jumlah Aset")
-    ekuitas_2026, ekuitas_prev = extract_two_numbers(text, "20 Jumlah Ekuitas")
+    aset_2026, aset_prev = extract_two_numbers(text, "35 Total Aset (21 + 34)")
+    ekuitas_2026, ekuitas_prev = extract_two_numbers(text, "20 Total Ekuitas (16 s.d. 19)")
     pend_premi_2026, pend_premi_prev = extract_two_numbers(text, "9 Jumlah Pendapatan Premi, Neto")
     premi_bruto_2026, premi_bruto_prev = extract_two_numbers(text, "3 Jumlah Premi Bruto")
     premi_reasu_2026, premi_reasu_prev = extract_two_numbers(text, "5 Jumlah Premi Reasuransi")
     premi_neto_2026, premi_neto_prev = extract_two_numbers(text, "9 Jumlah Pendapatan Premi, Neto")
     hasil_uw_2026, hasil_uw_prev = extract_two_numbers(text, "16 HASIL UNDERWRITING")
-    laba_komp_2026, laba_komp_prev = extract_two_numbers(text, "26 Total Laba")
-    solv_2026, solv_prev = extract_two_numbers(text, "Rasio Pencapaian")
+    laba_komp_2026, laba_komp_prev = extract_two_numbers(text, "TOTAL LABA KOMPREHENSIF")
+    solv_2026, solv_prev = extract_two_numbers(text, "Rasio Pencapaian Solvabilitas (%)")
     lik_2026, lik_prev = extract_two_numbers(text, "Rasio Likuiditas")
 
     current_period = f"{args.yyyy}-{args.mm:02d}"

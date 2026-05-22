@@ -42,8 +42,8 @@ def main():
     premi_reasu_2026, premi_reasu_prev = extract_two_numbers(text, "5 Jumlah Premi Reasuransi")
     premi_neto_2026, premi_neto_prev = extract_two_numbers(text, "10 Jumlah Premi Reasuransi Neto")
     hasil_uw_2026, hasil_uw_prev = extract_two_numbers(text, "16 HASIL UNDERWRITING")
-    laba_komp_2026, laba_komp_prev = extract_two_numbers(text, "Total Laba")
-    solv_2026, solv_prev = extract_two_numbers(text, "Rasio Pencapaian")
+    laba_komp_2026, laba_komp_prev = extract_two_numbers(text, "TOTAL LABA (RUGI) KOMPREHENSIF")
+    solv_2026, solv_prev = extract_two_numbers(text, "Rasio Pencapaian Solvabilitas (%)")
     lik_2026, lik_prev = extract_two_numbers(text, "Rasio Likuiditas")
 
     current_period = f"{args.yyyy}-{args.mm:02d}"
