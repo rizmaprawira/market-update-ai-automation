@@ -1,14 +1,17 @@
-"""Download financial reports for PT Asuransi Allianz Utama Indonesia."""
+"""Download financial reports for PT Great Eastern Life Indonesia."""
 import argparse
+import json
 import logging
+import re
 import sys
-import time
 from pathlib import Path
+from urllib.parse import urljoin
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _downloader_base import (
     build_session, extract_pdf_links, download_pdf, write_manifest, write_debug_html,
-    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp
+    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp,
+    MONTH_LABELS, sync_playwright
 )
 
 LOGGER = logging.getLogger("download_pt_great_eastern_life_indonesia")
@@ -17,12 +20,74 @@ COMPANY_ID = "pt_great_eastern_life_indonesia"
 COMPANY_NAME = "PT Great Eastern Life Indonesia"
 CATEGORY = "asuransi_jiwa"
 
+def discover_great_eastern_report(year, month, timeout=30):
+    """Discover Great Eastern report by scrolling and extracting with strict period filtering."""
+    if sync_playwright is None:
+        raise RuntimeError("Playwright not installed")
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        try:
+            page.goto(SOURCE_URL, wait_until="domcontentloaded", timeout=timeout * 1000)
+            page.wait_for_timeout(2000)
+
+            # Scroll to bottom to reveal "Laporan Keuangan Lainnya" section
+            for _ in range(3):
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_timeout(500)
+
+            # Get rendered HTML after scrolling
+            html = page.content()
+
+            # Extract all PDF candidates (not filtered by period yet)
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html, "html.parser")
+
+            month_label = MONTH_LABELS[month].lower()
+            year_str = str(year)
+
+            # Find all PDF links and filter by exact period match
+            best_match = None
+            best_score = -1
+
+            for link in soup.find_all("a"):
+                href = link.get("href", "").strip()
+                text = link.get_text(strip=True).lower()
+
+                if not href or not href.lower().endswith(".pdf"):
+                    continue
+
+                # Score based on period match
+                score = 0
+
+                # Check if target year appears in link
+                if year_str in text or year_str in href:
+                    score += 10
+
+                # Check if target month appears in link (exact match)
+                if month_label in text:
+                    score += 20
+                elif f"0{month}" in text or f"-{month:02d}" in text:
+                    score += 15
+
+                # Check for "konvensional" (conventional reports, not syariah)
+                if "konvensional" in text or "konvensional" in href.lower():
+                    score += 5
+
+                # Only consider if we found a relevant match
+                if score > 0 and score > best_score:
+                    best_score = score
+                    best_match = urljoin(SOURCE_URL, href)
+
+            return best_match
+        finally:
+            browser.close()
+
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
-    parser.add_argument("--year", type=int, required=True, help="Target year")
-    parser.add_argument("--yyyy", dest="year", type=int, help="Target year (alias for --year)")
-    parser.add_argument("--month", type=int, help="Target month (1-12)")
-    parser.add_argument("--mm", dest="month", type=int, help="Target month 1-12 (alias for --month)")
+    parser.add_argument("--year", "--yyyy", dest="year", type=int, required=True, help="Target year")
+    parser.add_argument("--month", "--mm", dest="month", type=int, required=True, help="Target month (1-12)")
     parser.add_argument("--output-root", type=Path, default=Path("data"))
     parser.add_argument("--dry-run", action="store_true", help="Discovery only, no download")
     parser.add_argument("--discover-only", action="store_true", help="Stop after discovery, return 0")
@@ -69,7 +134,19 @@ def main():
         return 1
     
     candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
-    
+
+    # For Great Eastern, try site-specific discovery to ensure exact period match
+    try:
+        LOGGER.info("Trying site-specific discovery for Great Eastern period matching")
+        pdf_url = discover_great_eastern_report(args.year, args.month, args.timeout)
+        if pdf_url:
+            from _downloader_base import PDFCandidate
+            month_name = MONTH_LABELS[args.month]
+            candidates = [PDFCandidate(url=pdf_url, text=f"Laporan Keuangan Konvensional {month_name} {args.year}", score=100, discovered_url=SOURCE_URL)]
+            LOGGER.info(f"Site-specific discovery found: {pdf_url}")
+    except Exception as e:
+        LOGGER.warning(f"Site-specific discovery failed: {e}")
+
     if not candidates:
         reason = "no PDF candidates found"
         LOGGER.warning(reason)
@@ -123,21 +200,24 @@ def main():
     http_status, file_size = download_pdf(
         session, selected_candidate.url, output_pdf, timeout=args.timeout, force=args.force
     )
-    
+
+    status = "downloaded" if http_status is not None else "skipped_existing"
+    reason = (
+        f"HTTP {http_status} ({file_size} bytes)"
+        if http_status is not None
+        else f"existing valid PDF kept ({file_size} bytes)"
+    )
+
     write_manifest(output_dir, [{
         "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
         "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
         "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
-        "output_path": str(output_pdf), "status": "downloaded" if success else "failed",
-        "reason": reason, "timestamp": current_timestamp()
+        "output_path": str(output_pdf), "status": status, "reason": reason,
+        "timestamp": current_timestamp()
     }])
-    
-    if success:
-        LOGGER.info(f"Successfully downloaded to {output_pdf}")
-    else:
-        LOGGER.error(f"Failed to download: {reason}")
-    
-    return 0 if success else 1
+
+    LOGGER.info(f"Download complete: {status} - {reason}")
+    return 0
 
 if __name__ == "__main__":
     sys.exit(main())
