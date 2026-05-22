@@ -381,7 +381,7 @@ if [[ "$FLAG_SKIP_PDFTOTEXT" != "true" && "$FLAG_DRY_RUN" != "true" && "$FLAG_DI
   log "INFO" "PHASE 2: Converting PDFs to Text (with OCR for special cases)..."
   log "INFO" "======================================================================="
 
-  TOTAL_COUNT=$(find "$PERIOD_DIR" -regex ".*_[0-9]\{4\}_[0-9]\{2\}\.pdf" | wc -l)
+  TOTAL_COUNT=$(find "$PERIOD_DIR/asuransi_umum" -regex ".*_[0-9]\{4\}_[0-9]\{2\}\.pdf" 2>/dev/null | wc -l)
 
   if [[ "$TOTAL_COUNT" -eq 0 ]]; then
     log "WARN" "No PDF files found for conversion"
@@ -485,7 +485,7 @@ if [[ "$FLAG_SKIP_PDFTOTEXT" != "true" && "$FLAG_DRY_RUN" != "true" && "$FLAG_DI
         log "ERROR" "[$INDEX/$TOTAL_COUNT] ${pdf_basename} -> FAIL"
         PDFTOTEXT_FAIL=$((PDFTOTEXT_FAIL + 1))
       fi
-    done < <(find "$PERIOD_DIR" -regex ".*_[0-9]\{4\}_[0-9]\{2\}\.pdf" | sort)
+    done < <(find "$PERIOD_DIR/asuransi_umum" -regex ".*_[0-9]\{4\}_[0-9]\{2\}\.pdf" 2>/dev/null | sort)
 
     log "INFO" "PHASE 2 Complete | success=${PDFTOTEXT_SUCCESS} fail=${PDFTOTEXT_FAIL}"
   fi

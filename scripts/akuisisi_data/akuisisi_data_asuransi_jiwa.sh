@@ -5,7 +5,7 @@ set -o pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  ./scripts/akuisisi_data/akuisisi_data_reasuransi.sh --yyyy 2026 --mm 03 [options]
+  ./scripts/akuisisi_data/akuisisi_data_asuransi_jiwa.sh --yyyy 2026 --mm 04 [options]
 
 Comprehensive data acquisition: Download PDFs → PDF-to-Text (with OCR) → Extract Key Metrics
 
@@ -25,7 +25,6 @@ Optional:
   --discover-only                Discover reports without downloading
   --use-browser                  Use browser rendering for discovery
   --debug-html                   Save HTML debug files
-  --skip-nusantara               Skip PT Reasuransi Nusantara Makmur
   --skip-download                Skip Phase 1 (download), do phases 2+3
   --skip-pdftotext               Skip Phase 2 (pdftotext), do phases 1+3
   --skip-key-metric              Skip Phase 3 (metrics extraction), do phases 1+2
@@ -58,7 +57,6 @@ FLAG_DRY_RUN=false
 FLAG_DISCOVER_ONLY=false
 FLAG_USE_BROWSER=false
 FLAG_DEBUG_HTML=false
-FLAG_SKIP_NUSANTARA=false
 FLAG_SKIP_DOWNLOAD=false
 FLAG_SKIP_PDFTOTEXT=false
 FLAG_SKIP_KEY_METRIC=false
@@ -117,10 +115,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --debug-html)
       FLAG_DEBUG_HTML=true
-      shift
-      ;;
-    --skip-nusantara)
-      FLAG_SKIP_NUSANTARA=true
       shift
       ;;
     --skip-download)
@@ -190,7 +184,12 @@ if ! command -v pdftotext >/dev/null 2>&1; then
 fi
 
 if ! command -v ocrmypdf >/dev/null 2>&1; then
-  echo "Error: ocrmypdf command not found (required for maipark OCR)."
+  echo "Error: ocrmypdf command not found (required for OCR)."
+  exit 1
+fi
+
+if ! command -v magick >/dev/null 2>&1; then
+  echo "Error: magick command not found (required for image conversion)."
   exit 1
 fi
 
@@ -201,11 +200,11 @@ PERIOD_DIR="${OUTPUT_ROOT}/${PERIODE}"
 mkdir -p "$PERIOD_DIR"
 mkdir -p "$MAMBA_CACHE_HOME"
 
-LOG_FILE="${PERIOD_DIR}/akuisisi_log.txt"
-MAIN_SUMMARY="${PERIOD_DIR}/akuisisi_summary.md"
+LOG_FILE="${PERIOD_DIR}/akuisisi_log_asuransi_jiwa.txt"
+MAIN_SUMMARY="${PERIOD_DIR}/akuisisi_summary_asuransi_jiwa.md"
 
 log "INFO" "======================================================================"
-log "INFO" "Start Akuisisi Data Reasuransi | period=${PERIODE}"
+log "INFO" "Start Akuisisi Data Asuransi Jiwa | period=${PERIODE}"
 log "INFO" "======================================================================"
 
 DOWNLOAD_SUCCESS=0
@@ -223,26 +222,55 @@ if [[ "$FLAG_SKIP_DOWNLOAD" != "true" ]]; then
   log "INFO" "======================================================================="
 
   COMPANY_SCRIPTS=(
-    "reasuransi/pt_indoperkasa_suksesjaya_reasuransi/pt_indoperkasa_suksesjaya_reasuransi_download.py"
-    "reasuransi/pt_maskapai_reasuransi_indonesia/pt_maskapai_reasuransi_indonesia_download.py"
-    "reasuransi/pt_orion_reasuransi_indonesia/pt_orion_reasuransi_indonesia_download.py"
-    "reasuransi/pt_reasuransi_indonesia_utama/pt_reasuransi_indonesia_utama_download.py"
-    "reasuransi/pt_reasuransi_maipark_indonesia/pt_reasuransi_maipark_indonesia_download.py"
-    "reasuransi/pt_reasuransi_nasional_indonesia/pt_reasuransi_nasional_indonesia_download.py"
-    "reasuransi/pt_reasuransi_nusantara_makmur/pt_reasuransi_nusantara_makmur_download.py"
-    "reasuransi/pt_tugu_reasuransi_indonesia/pt_tugu_reasuransi_indonesia_download.py"
+    "asuransi_jiwa/pt_aia_financial/pt_aia_financial_download.py"
+    "asuransi_jiwa/pt_ajb_bumiputera_1912/pt_ajb_bumiputera_1912_download.py"
+    "asuransi_jiwa/pt_asuransi_allianz_life_indonesia/pt_asuransi_allianz_life_indonesia_download.py"
+    "asuransi_jiwa/pt_asuransi_bri_life/pt_asuransi_bri_life_download.py"
+    "asuransi_jiwa/pt_asuransi_ciputra_indonesia/pt_asuransi_ciputra_indonesia_download.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_astra/pt_asuransi_jiwa_astra_download.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_bca/pt_asuransi_jiwa_bca_download.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_central_asia_raya/pt_asuransi_jiwa_central_asia_raya_download.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_generali_indonesia/pt_asuransi_jiwa_generali_indonesia_download.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_ifg/pt_asuransi_jiwa_ifg_download.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_mandiri_inhealth_indonesia/pt_asuransi_jiwa_mandiri_inhealth_indonesia_download.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_manulife_indonesia/pt_asuransi_jiwa_manulife_indonesia_download.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_nasional/pt_asuransi_jiwa_nasional_download.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_reliance_indonesia/pt_asuransi_jiwa_reliance_indonesia_download.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_sealnsure/pt_asuransi_jiwa_sealnsure_download.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_sequis_financial/pt_asuransi_jiwa_sequis_financial_download.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_sequis_life/pt_asuransi_jiwa_sequis_life_download.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_starinvestama/pt_asuransi_jiwa_starinvestama_download.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_taspen/pt_asuransi_jiwa_taspen_download.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_teguh_pelita_pelindung/pt_asuransi_jiwa_teguh_pelita_pelindung_download.py"
+    "asuransi_jiwa/pt_asuransi_simas_jiwa/pt_asuransi_simas_jiwa_download.py"
+    "asuransi_jiwa/pt_avrist_assurance/pt_avrist_assurance_download.py"
+    "asuransi_jiwa/pt_axa_financial_indonesia/pt_axa_financial_indonesia_download.py"
+    "asuransi_jiwa/pt_axa_mandiri_financial_services/pt_axa_mandiri_financial_services_download.py"
+    "asuransi_jiwa/pt_bhinneka_life_indonesia/pt_bhinneka_life_indonesia_download.py"
+    "asuransi_jiwa/pt_bni_life_insurance/pt_bni_life_insurance_download.py"
+    "asuransi_jiwa/pt_capital_life_indonesia/pt_capital_life_indonesia_download.py"
+    "asuransi_jiwa/pt_central_asia_financial__jagadiri_/pt_central_asia_financial__jagadiri__download.py"
+    "asuransi_jiwa/pt_china_life_insurance_indonesia/pt_china_life_insurance_indonesia_download.py"
+    "asuransi_jiwa/pt_chubb_life_insurance/pt_chubb_life_insurance_download.py"
+    "asuransi_jiwa/pt_equity_life_indonesia/pt_equity_life_indonesia_download.py"
+    "asuransi_jiwa/pt_fwd_insurance_indonesia/pt_fwd_insurance_indonesia_download.py"
+    "asuransi_jiwa/pt_great_eastern_life_indonesia/pt_great_eastern_life_indonesia_download.py"
+    "asuransi_jiwa/pt_hanwha_life_insurance_indonesia/pt_hanwha_life_insurance_indonesia_download.py"
+    "asuransi_jiwa/pt_heksa_solution_insurance/pt_heksa_solution_insurance_download.py"
+    "asuransi_jiwa/pt_indolife_pensiontama/pt_indolife_pensiontama_download.py"
+    "asuransi_jiwa/pt_lippo_life_assurance/pt_lippo_life_assurance_download.py"
+    "asuransi_jiwa/pt_mnc_life_assurance/pt_mnc_life_assurance_download.py"
+    "asuransi_jiwa/pt_msig_life_insurance_indonesia_tbk/pt_msig_life_insurance_indonesia_tbk_download.py"
+    "asuransi_jiwa/pt_pacific_life_insurance/pt_pacific_life_insurance_download.py"
+    "asuransi_jiwa/pt_panin_dai-chi_life/pt_panin_dai-chi_life_download.py"
+    "asuransi_jiwa/pt_perta_life_insurance/pt_perta_life_insurance_download.py"
+    "asuransi_jiwa/pt_pfi_mega_life_insurance/pt_pfi_mega_life_insurance_download.py"
+    "asuransi_jiwa/pt_prudential_life_assurance/pt_prudential_life_assurance_download.py"
+    "asuransi_jiwa/pt_sun_life_financial_indonesia/pt_sun_life_financial_indonesia_download.py"
+    "asuransi_jiwa/pt_tokio_marine_life_insurance_indonesia/pt_tokio_marine_life_insurance_indonesia_download.py"
+    "asuransi_jiwa/pt_victoria_alife_indonesia/pt_victoria_alife_indonesia_download.py"
+    "asuransi_jiwa/pt_zurich_topas_life/pt_zurich_topas_life_download.py"
   )
-
-  if [[ "$FLAG_SKIP_NUSANTARA" == "true" ]]; then
-    FILTERED=()
-    for s in "${COMPANY_SCRIPTS[@]}"; do
-      if [[ "$s" == *"pt_reasuransi_nusantara_makmur"* ]]; then
-        continue
-      fi
-      FILTERED+=("$s")
-    done
-    COMPANY_SCRIPTS=("${FILTERED[@]}")
-  fi
 
   TOTAL_COUNT="${#COMPANY_SCRIPTS[@]}"
   INDEX=0
@@ -261,7 +289,7 @@ if [[ "$FLAG_SKIP_DOWNLOAD" != "true" ]]; then
     fi
 
     company_snake="$(basename "${script_name%_download.py}")"
-    company_dir="${PERIOD_DIR}/reasuransi/${company_snake}"
+    company_dir="${PERIOD_DIR}/asuransi_jiwa/${company_snake}"
     pdf_path="${company_dir}/${company_snake}_${TAHUN}_${BULAN}.pdf"
 
     if [[ "$MODE_RESUME" == "true" && -f "$pdf_path" && "$FLAG_FORCE" == "false" ]]; then
@@ -324,13 +352,13 @@ if [[ "$FLAG_SKIP_DOWNLOAD" != "true" ]]; then
 fi
 
 # ============================================================================
-# PHASE 2: PDF to TEXT conversion (with OCR for maipark)
+# PHASE 2: PDF to TEXT conversion (with OCR for special cases)
 # ============================================================================
 if [[ "$FLAG_SKIP_PDFTOTEXT" != "true" && "$FLAG_DRY_RUN" != "true" && "$FLAG_DISCOVER_ONLY" != "true" ]]; then
-  log "INFO" "PHASE 2: Converting PDFs to Text (with OCR for maipark)..."
+  log "INFO" "PHASE 2: Converting PDFs to Text (with OCR for special cases)..."
   log "INFO" "======================================================================="
 
-  TOTAL_COUNT=$(find "$PERIOD_DIR/reasuransi" -regex ".*_[0-9]\{4\}_[0-9]\{2\}\.pdf" 2>/dev/null | wc -l)
+  TOTAL_COUNT=$(find "$PERIOD_DIR/asuransi_jiwa" -regex ".*_[0-9]\{4\}_[0-9]\{2\}\.pdf" 2>/dev/null | wc -l)
 
   if [[ "$TOTAL_COUNT" -eq 0 ]]; then
     log "WARN" "No PDF files found for conversion"
@@ -354,38 +382,11 @@ if [[ "$FLAG_SKIP_PDFTOTEXT" != "true" && "$FLAG_DRY_RUN" != "true" && "$FLAG_DI
       start_epoch="$(date +%s)"
       log "INFO" "[$INDEX/$TOTAL_COUNT] RUN ${pdf_basename}"
 
-      is_maipark=false
-      if [[ "$pdf_basename" == *"maipark"* ]]; then
-        is_maipark=true
-      fi
-
       exit_code=0
-      if [[ "$is_maipark" == "true" ]]; then
-        ocr_pdf="${pdf_dir}/${pdf_basename%.pdf}_ocr.pdf"
-        log "INFO" "[$INDEX/$TOTAL_COUNT] Running OCR for maipark"
-        mkdir -p "$HOME/ocrmypdf_tmp"
-        if TMPDIR="$HOME/ocrmypdf_tmp" ocrmypdf --deskew --clean --oversample 400 --tesseract-pagesegmode 1 "$(cd "$(dirname "$pdf_path")" && pwd)/$(basename "$pdf_path")" "$ocr_pdf" >> "$LOG_FILE" 2>&1; then
-          log "INFO" "[$INDEX/$TOTAL_COUNT] OCR completed, running pdftotext"
-          if pdftotext -layout "$ocr_pdf" "$txt_path" >> "$LOG_FILE" 2>&1; then
-            exit_code=0
-          else
-            exit_code=$?
-          fi
-        else
-          exit_code=$?
-          log "WARN" "[$INDEX/$TOTAL_COUNT] OCR failed, trying pdftotext on original PDF"
-          if pdftotext -layout "$pdf_path" "$txt_path" >> "$LOG_FILE" 2>&1; then
-            exit_code=0
-          else
-            exit_code=$?
-          fi
-        fi
+      if pdftotext -layout "$pdf_path" "$txt_path" >> "$LOG_FILE" 2>&1; then
+        exit_code=0
       else
-        if pdftotext -layout "$pdf_path" "$txt_path" >> "$LOG_FILE" 2>&1; then
-          exit_code=0
-        else
-          exit_code=$?
-        fi
+        exit_code=$?
       fi
 
       end_epoch="$(date +%s)"
@@ -398,7 +399,7 @@ if [[ "$FLAG_SKIP_PDFTOTEXT" != "true" && "$FLAG_DRY_RUN" != "true" && "$FLAG_DI
         log "ERROR" "[$INDEX/$TOTAL_COUNT] ${pdf_basename} -> FAIL"
         PDFTOTEXT_FAIL=$((PDFTOTEXT_FAIL + 1))
       fi
-    done < <(find "$PERIOD_DIR/reasuransi" -regex ".*_[0-9]\{4\}_[0-9]\{2\}\.pdf" 2>/dev/null | sort)
+    done < <(find "$PERIOD_DIR/asuransi_jiwa" -regex ".*_[0-9]\{4\}_[0-9]\{2\}\.pdf" 2>/dev/null | sort)
 
     log "INFO" "PHASE 2 Complete | success=${PDFTOTEXT_SUCCESS} fail=${PDFTOTEXT_FAIL}"
   fi
@@ -413,26 +414,55 @@ if [[ "$FLAG_SKIP_KEY_METRIC" != "true" && "$FLAG_DRY_RUN" != "true" && "$FLAG_D
   log "INFO" "======================================================================="
 
   METRIC_SCRIPTS=(
-    "reasuransi/pt_maskapai_reasuransi_indonesia/pt_maskapai_reasuransi_indonesia_key_metric.py"
-    "reasuransi/pt_indoperkasa_suksesjaya_reasuransi/pt_indoperkasa_suksesjaya_reasuransi_key_metric.py"
-    "reasuransi/pt_orion_reasuransi_indonesia/pt_orion_reasuransi_indonesia_key_metric.py"
-    "reasuransi/pt_reasuransi_indonesia_utama/pt_reasuransi_indonesia_utama_key_metric.py"
-    "reasuransi/pt_reasuransi_maipark_indonesia/pt_reasuransi_maipark_indonesia_key_metric.py"
-    "reasuransi/pt_reasuransi_nasional_indonesia/pt_reasuransi_nasional_indonesia_key_metric.py"
-    "reasuransi/pt_reasuransi_nusantara_makmur/pt_reasuransi_nusantara_makmur_key_metric.py"
-    "reasuransi/pt_tugu_reasuransi_indonesia/pt_tugu_reasuransi_indonesia_key_metric.py"
+    "asuransi_jiwa/pt_aia_financial/pt_aia_financial_key_metric.py"
+    "asuransi_jiwa/pt_ajb_bumiputera_1912/pt_ajb_bumiputera_1912_key_metric.py"
+    "asuransi_jiwa/pt_asuransi_allianz_life_indonesia/pt_asuransi_allianz_life_indonesia_key_metric.py"
+    "asuransi_jiwa/pt_asuransi_bri_life/pt_asuransi_bri_life_key_metric.py"
+    "asuransi_jiwa/pt_asuransi_ciputra_indonesia/pt_asuransi_ciputra_indonesia_key_metric.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_astra/pt_asuransi_jiwa_astra_key_metric.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_bca/pt_asuransi_jiwa_bca_key_metric.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_central_asia_raya/pt_asuransi_jiwa_central_asia_raya_key_metric.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_generali_indonesia/pt_asuransi_jiwa_generali_indonesia_key_metric.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_ifg/pt_asuransi_jiwa_ifg_key_metric.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_mandiri_inhealth_indonesia/pt_asuransi_jiwa_mandiri_inhealth_indonesia_key_metric.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_manulife_indonesia/pt_asuransi_jiwa_manulife_indonesia_key_metric.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_nasional/pt_asuransi_jiwa_nasional_key_metric.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_reliance_indonesia/pt_asuransi_jiwa_reliance_indonesia_key_metric.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_sealnsure/pt_asuransi_jiwa_sealnsure_key_metric.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_sequis_financial/pt_asuransi_jiwa_sequis_financial_key_metric.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_sequis_life/pt_asuransi_jiwa_sequis_life_key_metric.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_starinvestama/pt_asuransi_jiwa_starinvestama_key_metric.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_taspen/pt_asuransi_jiwa_taspen_key_metric.py"
+    "asuransi_jiwa/pt_asuransi_jiwa_teguh_pelita_pelindung/pt_asuransi_jiwa_teguh_pelita_pelindung_key_metric.py"
+    "asuransi_jiwa/pt_asuransi_simas_jiwa/pt_asuransi_simas_jiwa_key_metric.py"
+    "asuransi_jiwa/pt_avrist_assurance/pt_avrist_assurance_key_metric.py"
+    "asuransi_jiwa/pt_axa_financial_indonesia/pt_axa_financial_indonesia_key_metric.py"
+    "asuransi_jiwa/pt_axa_mandiri_financial_services/pt_axa_mandiri_financial_services_key_metric.py"
+    "asuransi_jiwa/pt_bhinneka_life_indonesia/pt_bhinneka_life_indonesia_key_metric.py"
+    "asuransi_jiwa/pt_bni_life_insurance/pt_bni_life_insurance_key_metric.py"
+    "asuransi_jiwa/pt_capital_life_indonesia/pt_capital_life_indonesia_key_metric.py"
+    "asuransi_jiwa/pt_central_asia_financial__jagadiri_/pt_central_asia_financial__jagadiri__key_metric.py"
+    "asuransi_jiwa/pt_china_life_insurance_indonesia/pt_china_life_insurance_indonesia_key_metric.py"
+    "asuransi_jiwa/pt_chubb_life_insurance/pt_chubb_life_insurance_key_metric.py"
+    "asuransi_jiwa/pt_equity_life_indonesia/pt_equity_life_indonesia_key_metric.py"
+    "asuransi_jiwa/pt_fwd_insurance_indonesia/pt_fwd_insurance_indonesia_key_metric.py"
+    "asuransi_jiwa/pt_great_eastern_life_indonesia/pt_great_eastern_life_indonesia_key_metric.py"
+    "asuransi_jiwa/pt_hanwha_life_insurance_indonesia/pt_hanwha_life_insurance_indonesia_key_metric.py"
+    "asuransi_jiwa/pt_heksa_solution_insurance/pt_heksa_solution_insurance_key_metric.py"
+    "asuransi_jiwa/pt_indolife_pensiontama/pt_indolife_pensiontama_key_metric.py"
+    "asuransi_jiwa/pt_lippo_life_assurance/pt_lippo_life_assurance_key_metric.py"
+    "asuransi_jiwa/pt_mnc_life_assurance/pt_mnc_life_assurance_key_metric.py"
+    "asuransi_jiwa/pt_msig_life_insurance_indonesia_tbk/pt_msig_life_insurance_indonesia_tbk_key_metric.py"
+    "asuransi_jiwa/pt_pacific_life_insurance/pt_pacific_life_insurance_key_metric.py"
+    "asuransi_jiwa/pt_panin_dai-chi_life/pt_panin_dai-chi_life_key_metric.py"
+    "asuransi_jiwa/pt_perta_life_insurance/pt_perta_life_insurance_key_metric.py"
+    "asuransi_jiwa/pt_pfi_mega_life_insurance/pt_pfi_mega_life_insurance_key_metric.py"
+    "asuransi_jiwa/pt_prudential_life_assurance/pt_prudential_life_assurance_key_metric.py"
+    "asuransi_jiwa/pt_sun_life_financial_indonesia/pt_sun_life_financial_indonesia_key_metric.py"
+    "asuransi_jiwa/pt_tokio_marine_life_insurance_indonesia/pt_tokio_marine_life_insurance_indonesia_key_metric.py"
+    "asuransi_jiwa/pt_victoria_alife_indonesia/pt_victoria_alife_indonesia_key_metric.py"
+    "asuransi_jiwa/pt_zurich_topas_life/pt_zurich_topas_life_key_metric.py"
   )
-
-  if [[ "$FLAG_SKIP_NUSANTARA" == "true" ]]; then
-    FILTERED=()
-    for s in "${METRIC_SCRIPTS[@]}"; do
-      if [[ "$s" == *"pt_reasuransi_nusantara_makmur"* ]]; then
-        continue
-      fi
-      FILTERED+=("$s")
-    done
-    METRIC_SCRIPTS=("${FILTERED[@]}")
-  fi
 
   TOTAL_COUNT="${#METRIC_SCRIPTS[@]}"
   INDEX=0
@@ -451,7 +481,7 @@ if [[ "$FLAG_SKIP_KEY_METRIC" != "true" && "$FLAG_DRY_RUN" != "true" && "$FLAG_D
     fi
 
     company_snake="$(basename "${script_name%_key_metric.py}")"
-    company_dir="${PERIOD_DIR}/reasuransi/${company_snake}"
+    company_dir="${PERIOD_DIR}/asuransi_jiwa/${company_snake}"
     txt_path="${company_dir}/${company_snake}_${TAHUN}_${BULAN}.txt"
     metric_csv="${company_dir}/${company_snake}_key_metric_${TAHUN}_${BULAN}.csv"
 
@@ -502,7 +532,7 @@ fi
 # FINAL SUMMARY
 # ============================================================================
 log "INFO" "======================================================================"
-log "INFO" "Akuisisi Data Reasuransi Complete"
+log "INFO" "Akuisisi Data Asuransi Jiwa Complete"
 log "INFO" "======================================================================"
 
 {
@@ -516,7 +546,7 @@ log "INFO" "====================================================================
     echo "- Status: SKIPPED"
   fi
   echo ""
-  echo "## Phase 2: PDF to Text Conversion (with OCR)"
+  echo "## Phase 2: PDF to Text Conversion"
   if [[ "$FLAG_SKIP_PDFTOTEXT" != "true" && "$FLAG_DRY_RUN" != "true" && "$FLAG_DISCOVER_ONLY" != "true" ]]; then
     echo "- Success: ${PDFTOTEXT_SUCCESS}"
     echo "- Fail: ${PDFTOTEXT_FAIL}"
@@ -528,7 +558,7 @@ log "INFO" "====================================================================
   if [[ "$FLAG_SKIP_KEY_METRIC" != "true" && "$FLAG_DRY_RUN" != "true" && "$FLAG_DISCOVER_ONLY" != "true" ]]; then
     echo "- Success: ${KEY_METRIC_SUCCESS}"
     echo "- Fail: ${KEY_METRIC_FAIL}"
-    echo "- Database: data/${PERIODE}/database_reasuransi_${TAHUN}_${BULAN}.csv"
+    echo "- Database: data/${PERIODE}/database_asuransi_jiwa_${TAHUN}_${BULAN}.csv"
   else
     echo "- Status: SKIPPED"
   fi
