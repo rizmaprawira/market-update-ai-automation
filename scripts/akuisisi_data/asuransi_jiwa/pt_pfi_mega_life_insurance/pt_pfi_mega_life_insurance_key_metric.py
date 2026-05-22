@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _key_metric_helpers import upsert_database_csv
+from _key_metric_helpers import upsert_database_csv, extract_two_numbers
 
 COLUMNS = [
     "periode",
@@ -27,23 +27,6 @@ COLUMNS = [
     "rasio_likuiditas",
 ]
 
-
-def extract_two_numbers(text: str, keyword: str):
-    pattern = re.compile(
-        rf"{re.escape(keyword)}\s+(\(?[0-9\.,%\-]+\)?)\s+(\(?[0-9\.,%\-]+\)?)",
-        re.IGNORECASE,
-    )
-    m = pattern.search(text)
-    if not m:
-        return None, None
-
-    def norm(s: str) -> str:
-        s = s.strip()
-        if s.startswith("(") and s.endswith(")"):
-            return "-" + s[1:-1]
-        return s
-
-    return norm(m.group(1)), norm(m.group(2))
 
 
 def main():

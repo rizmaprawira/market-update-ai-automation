@@ -2,16 +2,8 @@
 import argparse, csv, re, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _key_metric_helpers import upsert_database_csv
+from _key_metric_helpers import upsert_database_csv, extract_two_numbers
 COLUMNS = ["periode","jenis_asuransi","nama_perusahaan","aset","ekuitas","pendapatan_premi","premi_reasuransi","premi_neto","jumlah_pendapatan","beban_komisi_tahun_pertama","beban_komisi_tahun_lanjutan","beban_komisi_overiding","jumlah_beban_asuransi","laba_rugi_komprehensif","rasio_solvabilitas","rasio_likuiditas"]
-def extract_two_numbers(text: str, keyword: str):
-    pattern = re.compile(rf"{re.escape(keyword)}\s+(\(?[0-9\.,%\-]+\)?)\s+(\(?[0-9\.,%\-]+\)?)", re.IGNORECASE)
-    m = pattern.search(text)
-    if not m: return None, None
-    def norm(s: str) -> str:
-        s = s.strip()
-        return "-" + s[1:-1] if s.startswith("(") and s.endswith(")") else s
-    return norm(m.group(1)), norm(m.group(2))
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--yyyy", type=int, default=2026)
