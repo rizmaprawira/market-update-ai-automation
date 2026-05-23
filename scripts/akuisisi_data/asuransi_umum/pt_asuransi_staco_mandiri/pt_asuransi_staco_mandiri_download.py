@@ -2,14 +2,15 @@
 import argparse
 import logging
 import sys
-import time
 from pathlib import Path
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from _downloader_base import (
-    build_session, extract_pdf_links, download_pdf, write_manifest, write_debug_html,
-    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp
+    build_session, download_pdf, write_manifest, write_debug_html,
+    fetch_html_with_smart_fallback, current_timestamp, MONTH_NAMES
 )
 
 LOGGER = logging.getLogger("download_pt_asuransi_staco_mandiri")
@@ -17,6 +18,24 @@ SOURCE_URL = "https://stacoinsurance.com/laporan-bulanan/"
 COMPANY_ID = "pt_asuransi_staco_mandiri"
 COMPANY_NAME = "PT Asuransi Staco Mandiri"
 CATEGORY = "asuransi_umum"
+
+def extract_staco_pdfs(html, base_url, year, month):
+    soup = BeautifulSoup(html, 'html.parser')
+    candidates = []
+    month_names = MONTH_NAMES.get(month, [])
+    month_names_lower = [m.lower() for m in month_names]
+    for link in soup.find_all('a'):
+        href = link.get('href', '').strip()
+        if not href or not href.lower().endswith('.pdf'):
+            continue
+        text = link.get_text(strip=True).lower()
+        url = urljoin(base_url, href)
+        full_text = (text + " " + url.lower()).lower()
+        has_month = any(month_name in full_text for month_name in month_names_lower)
+        has_year = str(year) in full_text
+        if has_month and has_year:
+            candidates.append({'url': url, 'text': link.get_text(strip=True), 'score': 100})
+    return sorted(candidates, key=lambda x: x['score'], reverse=True)
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
@@ -46,13 +65,9 @@ def main():
     LOGGER.info(f"Fetching from {SOURCE_URL}")
 
     try:
-        if args.use_browser:
-            LOGGER.info("Using Playwright browser rendering")
-            html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
-        else:
-            html, discovered_url, used_browser = fetch_html_with_smart_fallback(
-                session, SOURCE_URL, args.year, args.month, args.timeout
-            )
+        html, discovered_url, used_browser = fetch_html_with_smart_fallback(
+            session, SOURCE_URL, args.year, args.month, args.timeout
+        )
     except Exception as e:
         reason = f"failed to fetch: {e}"
         LOGGER.error(reason)
@@ -67,7 +82,7 @@ def main():
         }])
         return 1
 
-    candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
+    candidates = extract_staco_pdfs(html, discovered_url, args.year, args.month)
 
     if not candidates:
         reason = "no PDF candidates found"
@@ -83,26 +98,26 @@ def main():
         }])
         return 1
 
-    selected_candidate = candidates[0]
-    LOGGER.info(f"Selected: {selected_candidate.text[:60]}")
+    selected = candidates[0]
+    LOGGER.info(f"Selected: {selected['text'][:60]}")
 
     if args.discover_only:
         LOGGER.info("Discovery complete (--discover-only mode)")
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-            "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+            "pdf_url": selected['url'], "target_year": args.year, "target_month": args.month,
             "output_path": str(output_pdf), "status": "discover_only", "reason": "discovery complete",
             "timestamp": current_timestamp()
         }])
         return 0
 
     if args.dry_run:
-        LOGGER.info(f"Dry-run: would download from {selected_candidate.url}")
+        LOGGER.info(f"Dry-run: would download from {selected['url']}")
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-            "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+            "pdf_url": selected['url'], "target_year": args.year, "target_month": args.month,
             "output_path": str(output_pdf), "status": "dry_run", "reason": "dry-run mode",
             "timestamp": current_timestamp()
         }])
@@ -113,37 +128,34 @@ def main():
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-            "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+            "pdf_url": selected['url'], "target_year": args.year, "target_month": args.month,
             "output_path": str(output_pdf), "status": "skipped_existing", "reason": "file exists",
             "timestamp": current_timestamp()
         }])
         return 0
 
-    http_status, file_size = download_pdf(
-        session, selected_candidate.url, output_pdf, timeout=args.timeout, force=args.force
-    )
-
-    status = "downloaded" if http_status is not None else "skipped_existing"
-    reason = (
-        f"HTTP {http_status} ({file_size} bytes)"
-        if http_status is not None
-        else f"existing valid ({file_size} bytes)"
-    )
+    try:
+        http_status, file_size = download_pdf(
+            session, selected['url'], output_pdf, timeout=args.timeout, force=args.force
+        )
+        status = "downloaded" if http_status is not None else "skipped_existing"
+        reason = f"HTTP {http_status} ({file_size} bytes)" if http_status else f"existing ({file_size} bytes)"
+        success = True
+    except Exception as e:
+        status = "error"
+        reason = f"Failed to download: {e}"
+        LOGGER.error(reason)
+        success = False
 
     write_manifest(output_dir, [{
         "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
         "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-        "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+        "pdf_url": selected['url'], "target_year": args.year, "target_month": args.month,
         "output_path": str(output_pdf), "status": status, "reason": reason,
         "timestamp": current_timestamp()
     }])
 
-    if http_status is not None:
-        LOGGER.info(f"Successfully downloaded to {output_pdf} ({file_size} bytes)")
-    else:
-        LOGGER.info(f"Using existing valid PDF at {output_pdf}")
-
-    return 0
+    return 0 if success else 1
 
 if __name__ == "__main__":
     sys.exit(main())
