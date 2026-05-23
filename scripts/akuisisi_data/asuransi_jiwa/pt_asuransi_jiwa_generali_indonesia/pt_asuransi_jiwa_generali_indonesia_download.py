@@ -108,21 +108,27 @@ def main():
             "timestamp": current_timestamp()
         }])
         return 0
-    
-    http_status, file_size = download_pdf(
-        session, selected_candidate.url, output_pdf, timeout=args.timeout, force=args.force
-    )
 
-    if http_status is not None:
-        status = "downloaded"
-        reason = f"HTTP {http_status} ({file_size} bytes)"
-        LOGGER.info(f"Successfully downloaded to {output_pdf}")
-        success = True
-    else:
-        status = "skipped_existing"
-        reason = f"existing valid PDF kept ({file_size} bytes)"
-        LOGGER.info(f"PDF already exists and is valid: {output_pdf}")
-        success = True
+    try:
+        http_status, file_size = download_pdf(
+            session, selected_candidate.url, output_pdf, timeout=args.timeout, force=args.force
+        )
+
+        if http_status is not None:
+            status = "downloaded"
+            reason = f"HTTP {http_status} ({file_size} bytes)"
+            LOGGER.info(f"Successfully downloaded to {output_pdf}")
+            success = True
+        else:
+            status = "skipped_existing"
+            reason = f"existing valid PDF kept ({file_size} bytes)"
+            LOGGER.info(f"PDF already exists and is valid: {output_pdf}")
+            success = True
+    except Exception as e:
+        status = "error"
+        reason = f"Failed to download: {e}"
+        LOGGER.error(reason)
+        success = False
 
     write_manifest(output_dir, [{
         "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
