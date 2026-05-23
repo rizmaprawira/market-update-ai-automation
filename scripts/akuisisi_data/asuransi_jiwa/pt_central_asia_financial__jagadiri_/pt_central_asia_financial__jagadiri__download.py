@@ -47,16 +47,23 @@ def fetch_jagadiri_pdfs(year, month, timeout=30):
                 if rel_pdf.startswith('/'):
                     pdf_urls.append(f"https://jagadiri.co.id{rel_pdf}")
 
-            # Filter by year and month
-            month_keywords = [month_name[month].lower(), str(month).zfill(2), f"0{month}"]
-            matching_pdfs = [
-                url for url in pdf_urls
-                if str(year) in url and any(kw in url.lower() for kw in month_keywords)
-            ]
+            # Filter by year and month with strict validation
+            month_keywords = [month_name[month].lower(), str(month).zfill(2)]
+            matching_pdfs = []
+
+            for url in pdf_urls:
+                url_lower = url.lower()
+                # Check for year match
+                if str(year) not in url_lower:
+                    continue
+                # Check for month match - must have explicit month indicator
+                if any(kw in url_lower for kw in month_keywords):
+                    matching_pdfs.append(url)
 
             LOGGER.info(f"Found {len(matching_pdfs)} PDFs for {year}-{month:02d}")
 
-            return content, SOURCE_URL, matching_pdfs if matching_pdfs else pdf_urls
+            # Return only matching PDFs, never fallback to all PDFs (would get wrong month)
+            return content, SOURCE_URL, matching_pdfs
         finally:
             browser.close()
 
