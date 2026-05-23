@@ -40,7 +40,14 @@ def find_sharepoint_url(year, month, timeout):
         browser = p.chromium.launch(headless=True)
         page = browser.new_page(user_agent=HEADERS["User-Agent"], viewport={"width": 1440, "height": 2200})
         try:
-            page.goto(SOURCE_URL, wait_until="domcontentloaded", timeout=timeout * 1000)
+            # Try to load with domcontentloaded, but don't fail if it times out
+            try:
+                page.goto(SOURCE_URL, wait_until="domcontentloaded", timeout=timeout * 1000)
+            except:
+                LOGGER.warning("Page load slow, continuing with partial load...")
+                # Continue anyway with whatever content is loaded
+                pass
+
             page.wait_for_timeout(3000)
             soup = BeautifulSoup(page.content(), "html.parser")
             for row in soup.find_all("tr"):
