@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _key_metric_helpers import upsert_database_csv, extract_two_numbers
+from _key_metric_helpers import upsert_database_csv, extract_two_numbers_semantic
 
 COLUMNS = [
     "periode",
@@ -27,6 +27,12 @@ COLUMNS = [
     "rasio_likuiditas",
 ]
 
+
+
+def extract_two_numbers(text: str, keywords):
+    if isinstance(keywords, str):
+        keywords = [keywords]
+    return extract_two_numbers_semantic(text, keywords)
 
 def main():
     parser = argparse.ArgumentParser(description="Extract BNI Life metrics from TXT file")
@@ -51,19 +57,19 @@ def main():
     company = "PT BNI Life Insurance"
     jenis = "Asuransi Jiwa"
 
-    aset_curr, aset_prev = extract_two_numbers(text, "Jumlah Aset (21 + 34)")
-    ekuitas_curr, ekuitas_prev = extract_two_numbers(text, "Jumlah Ekuitas (16 s/d 19)")
-    pend_premi_curr, pend_premi_prev = extract_two_numbers(text, "Pendapatan Premi")
-    premi_reasu_curr, premi_reasu_prev = extract_two_numbers(text, "Premi Reasuransi")
-    premi_neto_curr, premi_neto_prev = extract_two_numbers(text, "Jumlah Pendapatan Premi Neto")
-    jml_pend_curr, jml_pend_prev = extract_two_numbers(text, "Jumlah Pendapatan")
-    beban_komisi_tp_curr, beban_komisi_tp_prev = extract_two_numbers(text, "Beban Komisi - Tahun Pertama")
-    beban_komisi_tl_curr, beban_komisi_tl_prev = extract_two_numbers(text, "Beban Komisi - Tahun Lanjutan")
-    beban_komisi_ov_curr, beban_komisi_ov_prev = extract_two_numbers(text, "Beban Komisi - Overiding")
-    jml_beban_asuransi_curr, jml_beban_asuransi_prev = extract_two_numbers(text, "Jumlah Beban Asuransi")
-    laba_komp_curr, laba_komp_prev = extract_two_numbers(text, "Total Laba (Rugi) Komprehensif")
-    solv_curr, solv_prev = extract_two_numbers(text, "Rasio Pencapaian (%)")
-    lik_curr, lik_prev = extract_two_numbers(text, "Rasio Likuiditas (%)")
+    aset_curr, aset_prev = extract_two_numbers(text, [r"Jumlah Aset", r"Total Assets", r"JUMLAH ASET"])
+    ekuitas_curr, ekuitas_prev = extract_two_numbers(text, [r"Jumlah Ekuitas", r"Total Equity", r"TOTAL EKUITAS"])
+    pend_premi_curr, pend_premi_prev = extract_two_numbers(text, [r"Jumlah Pendapatan Premi", r"Total Premiums Income", r"Pendapatan Premi"])
+    premi_reasu_curr, premi_reasu_prev = extract_two_numbers(text, [r"Premi Penutupan Tidak Langsung", r"Indirect Premiums", r"Premi Reasuransi"])
+    premi_neto_curr, premi_neto_prev = extract_two_numbers(text, [r"Jumlah Premi Bruto", r"Total Gross Premiums", r"Jumlah Pendapatan Premi Neto"])
+    jml_pend_curr, jml_pend_prev = extract_two_numbers(text, [r"Jumlah Pendapatan", r"Total Income"])
+    beban_komisi_tp_curr, beban_komisi_tp_prev = extract_two_numbers(text, [r"Beban Komisi - Tahun Pertama", r"First Year Commission"])
+    beban_komisi_tl_curr, beban_komisi_tl_prev = extract_two_numbers(text, [r"Beban Komisi - Tahun Lanjutan", r"Renewal Commission"])
+    beban_komisi_ov_curr, beban_komisi_ov_prev = extract_two_numbers(text, [r"Beban Komisi - Overriding", r"Overriding Commission"])
+    jml_beban_asuransi_curr, jml_beban_asuransi_prev = extract_two_numbers(text, [r"HASIL UNDERWRITING", r"UNDERWRITING INCOME", r"Jumlah Beban Asuransi"])
+    laba_komp_curr, laba_komp_prev = extract_two_numbers(text, [r"TOTAL LABA.*KOMPREHENSIF", r"TOTAL COMPREHENSIVE INCOME", r"Total Laba Komprehensif"])
+    solv_curr, solv_prev = extract_two_numbers(text, [r"Rasio Pencapaian Solvabilitas", r"Solvency Margin Ratio", r"Rasio Pencapaian"])
+    lik_curr, lik_prev = extract_two_numbers(text, [r"Rasio Likuiditas", r"Liquidity Ratio"])
 
     current_period = f"{args.yyyy}-{args.mm:02d}"
     prev_year = args.yyyy - 1

@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _key_metric_helpers import upsert_database_csv
+from _key_metric_helpers import upsert_database_csv, extract_two_numbers_semantic
 
 COLUMNS = [
     "periode",
@@ -25,23 +25,10 @@ COLUMNS = [
 ]
 
 
-def extract_two_numbers(text: str, keyword: str):
-    pattern = re.compile(
-        rf"{re.escape(keyword)}\s+(\(?[0-9\.,%\-]+\)?)\s+(\(?[0-9\.,%\-]+\)?)",
-        re.IGNORECASE,
-    )
-    m = pattern.search(text)
-    if not m:
-        return None, None
-
-    def norm(s: str) -> str:
-        s = s.strip()
-        if s.startswith("(") and s.endswith(")"):
-            return "-" + s[1:-1]
-        return s
-
-    return norm(m.group(1)), norm(m.group(2))
-
+def extract_two_numbers(text: str, keywords):
+    if isinstance(keywords, str):
+        keywords = [keywords]
+    return extract_two_numbers_semantic(text, keywords)
 
 def main():
     parser = argparse.ArgumentParser(description="Extract Artarindo metrics from TXT file")
@@ -62,16 +49,16 @@ def main():
     company = "PT Asuransi Artarindo"
     jenis = "Asuransi Umum"
 
-    aset_2026, aset_prev = extract_two_numbers(text, "35 Jumlah Aset (21 + 34)")
-    ekuitas_2026, ekuitas_prev = extract_two_numbers(text, "19 Jumlah Ekuitas (15 s.d. 17)")
-    pend_premi_2026, pend_premi_prev = extract_two_numbers(text, "19 PENDAPATAN UNDERWRITING (17+18)")
-    premi_bruto_2026, premi_bruto_prev = extract_two_numbers(text, "6 Jumlah Premi Bruto (3+4-5)")
-    premi_reasu_2026, premi_reasu_prev = extract_two_numbers(text, "10 Jumlah Premi Reasuransi (8-9)")
-    premi_neto_2026, premi_neto_prev = extract_two_numbers(text, "11 Premi Neto (6-10)")
-    hasil_uw_2026, hasil_uw_prev = extract_two_numbers(text, "28 HASIL UNDERWRITING (19-27)")
-    laba_komp_2026, laba_komp_prev = extract_two_numbers(text, "45 TOTAL LABA (RUGI) KOMPREHENSIF (43+44)")
-    solv_2026, solv_prev = extract_two_numbers(text, "3)")
-    lik_2026, lik_prev = extract_two_numbers(text, "b. Rasio Likuiditas (%)")
+    aset_2026, aset_prev = extract_two_numbers(text, [r"Jumlah Aset", r"Total Assets", r"JUMLAH ASET"])
+    ekuitas_2026, ekuitas_prev = extract_two_numbers(text, [r"Jumlah Ekuitas", r"Total Equity", r"TOTAL EKUITAS"])
+    pend_premi_2026, pend_premi_prev = extract_two_numbers(text, [r"Jumlah Pendapatan Premi", r"Total Premiums Income", r"Pendapatan Underwriting"])
+    premi_bruto_2026, premi_bruto_prev = extract_two_numbers(text, [r"Jumlah Premi Bruto", r"Total Gross Premiums"])
+    premi_reasu_2026, premi_reasu_prev = extract_two_numbers(text, [r"Jumlah Premi Reasuransi"])
+    premi_neto_2026, premi_neto_prev = extract_two_numbers(text, [r"Jumlah Premi Neto", r"Total Net Premiums"])
+    hasil_uw_2026, hasil_uw_prev = extract_two_numbers(text, [r"HASIL UNDERWRITING", r"UNDERWRITING INCOME"])
+    laba_komp_2026, laba_komp_prev = extract_two_numbers(text, [r"TOTAL LABA.*KOMPREHENSIF", r"TOTAL COMPREHENSIVE INCOME"])
+    solv_2026, solv_prev = extract_two_numbers(text, [r"Rasio Pencapaian Solvabilitas", r"Solvency Margin Ratio"])
+    lik_2026, lik_prev = extract_two_numbers(text, [r"Rasio Likuiditas", r"Liquidity Ratio"])
 
     current_period = f"{args.yyyy}-{args.mm:02d}"
     prev_year = args.yyyy - 1

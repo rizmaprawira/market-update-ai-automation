@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _key_metric_helpers import upsert_database_csv
+from _key_metric_helpers import upsert_database_csv, extract_two_numbers_semantic
 
 COLUMNS = [
     "periode",
@@ -24,22 +24,14 @@ COLUMNS = [
 ]
 
 
-def extract_two_numbers(text: str, keyword: str):
-    pattern = re.compile(
-        rf"{re.escape(keyword)}\s+(\(?[0-9\.,-]+\)?)\s+(\(?[0-9\.,-]+\)?)",
-        re.IGNORECASE,
-    )
-    m = pattern.search(text)
-    if not m:
-        return None, None
-
-    def norm(s: str) -> str:
-        s = s.strip()
-        if s.startswith("(") and s.endswith(")"):
-            return "-" + s[1:-1]
-        return s
-
-    return norm(m.group(1)), norm(m.group(2))
+def extract_two_numbers(text: str, keywords):
+    """
+    Extract two numbers using semantic/content-based search.
+    Keywords can be a string (for backward compatibility) or list of patterns.
+    """
+    if isinstance(keywords, str):
+        keywords = [keywords]
+    return extract_two_numbers_semantic(text, keywords)
 
 
 def main():
@@ -61,15 +53,52 @@ def main():
     company = "PT Maskapai Reasuransi Indonesia Tbk."
     jenis = "Reasuransi"
 
-    aset_2026, aset_prev = extract_two_numbers(text, "34 Jumlah Aset (20 + 33)")
-    ekuitas_2026, ekuitas_prev = extract_two_numbers(text, "20 Jumlah Ekuitas (16 s/d 19)")
-    premi_tl_2026, premi_tl_2025 = extract_two_numbers(text, "b. Premi Penutupan Tidak Langsung")
-    premi_bruto_2026, premi_bruto_2025 = extract_two_numbers(text, "4 Jumlah Premi Bruto")
-    pend_premi_2026, pend_premi_2025 = extract_two_numbers(text, "2 Jumlah Pendapatan Premi")
-    hasil_uw_2026, hasil_uw_2025 = extract_two_numbers(text, "17 HASIL UNDERWRITING")
-    laba_komp_2026, laba_komp_2025 = extract_two_numbers(text, "27 TOTAL LABA (RUGI) KOMPREHENSIF")
-    solv_2026, solv_prev = extract_two_numbers(text, "D. Rasio Pencapaian Solvabilitas (%) *)")
-    lik_2026, lik_prev = extract_two_numbers(text, "b. Rasio Likuiditas (%)")
+    # Use semantic keywords that are robust to line number changes
+    aset_2026, aset_prev = extract_two_numbers(text, [
+        r"Jumlah Aset\s*\(\d+\s*\+\s*\d+\)",  # Matches any "Jumlah Aset (N + M)" format
+        r"Total Assets",
+        r"JUMLAH ASET"
+    ])
+    ekuitas_2026, ekuitas_prev = extract_two_numbers(text, [
+        r"Jumlah Ekuitas",
+        r"Total Equity",
+        r"TOTAL EKUITAS"
+    ])
+    premi_tl_2026, premi_tl_2025 = extract_two_numbers(text, [
+        r"Premi Penutupan Tidak Langsung",
+        r"Indirect Premiums",
+        r"Premi.*Tidak.*Langsung"
+    ])
+    premi_bruto_2026, premi_bruto_2025 = extract_two_numbers(text, [
+        r"Jumlah Premi Bruto",
+        r"Total Gross Premiums",
+        r"Premi.*Bruto"
+    ])
+    pend_premi_2026, pend_premi_2025 = extract_two_numbers(text, [
+        r"Jumlah Pendapatan Premi",
+        r"Total Premiums Income",
+        r"Pendapatan.*Premi"
+    ])
+    hasil_uw_2026, hasil_uw_2025 = extract_two_numbers(text, [
+        r"HASIL UNDERWRITING",
+        r"UNDERWRITING INCOME",
+        r"Hasil.*Underwriting"
+    ])
+    laba_komp_2026, laba_komp_2025 = extract_two_numbers(text, [
+        r"TOTAL LABA.*KOMPREHENSIF",
+        r"TOTAL COMPREHENSIVE INCOME",
+        r"Laba.*Komprehensif"
+    ])
+    solv_2026, solv_prev = extract_two_numbers(text, [
+        r"Rasio Pencapaian Solvabilitas",
+        r"Solvency Margin Ratio",
+        r"Solvabilitas"
+    ])
+    lik_2026, lik_prev = extract_two_numbers(text, [
+        r"Rasio Likuiditas",
+        r"Liquidity Ratio",
+        r"Likuiditas\s*\(%\)"
+    ])
 
     # Catatan: tabel posisi keuangan & kesehatan membandingkan current vs prev year,
     # sedangkan tabel laba rugi membandingkan current vs same month prev year.

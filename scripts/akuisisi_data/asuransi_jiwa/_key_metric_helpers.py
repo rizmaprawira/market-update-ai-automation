@@ -5,6 +5,68 @@ from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 
 
+def extract_two_numbers_semantic(
+    text: str,
+    keywords: List[str],
+) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Extract two numbers from text based on keyword patterns (semantic search).
+
+    More robust than line-number dependent approach. Finds keyword anywhere in text,
+    then extracts the two closest meaningful numbers after it.
+
+    Args:
+        text: Full text to search
+        keywords: List of keyword patterns to try (in priority order)
+
+    Returns:
+        Tuple of (current_period_value, previous_period_value) or (None, None)
+    """
+    text = re.sub(r"\s+", " ", text)
+
+    def extract_numbers_after_keyword(keyword_pattern: str):
+        """Find keyword pattern and extract two large numbers after it."""
+        try:
+            pattern = re.compile(keyword_pattern, re.IGNORECASE)
+            match = pattern.search(text)
+            if not match:
+                return None, None
+
+            # Get text after the keyword, search in next 300 chars
+            start_pos = match.end()
+            context_text = text[start_pos:start_pos + 300]
+
+            # Extract numbers with their positions
+            number_pattern = r"([0-9]+(?:[.,][0-9]+)*)"
+            numbers_with_pos = [(m.group(1), m.start()) for m in re.finditer(number_pattern, context_text)]
+
+            if len(numbers_with_pos) < 2:
+                return None, None
+
+            # Filter for larger numbers (likely to be the actual values, not line numbers)
+            # Line numbers are typically 1-50, so look for larger numbers
+            large_numbers = [n for n in numbers_with_pos if len(n[0].replace(".", "").replace(",", "")) > 3]
+
+            if len(large_numbers) < 2:
+                # Fallback: just take first two non-trivial numbers
+                large_numbers = numbers_with_pos
+
+            if len(large_numbers) >= 2:
+                return large_numbers[0][0], large_numbers[1][0]
+
+            return None, None
+        except Exception:
+            return None, None
+
+    # Try each keyword pattern in order
+    for keyword in keywords:
+        val1, val2 = extract_numbers_after_keyword(keyword)
+        if val1 is not None and val2 is not None:
+            return val1, val2
+
+    return None, None
+
+
 def upsert_database_csv(
     database_csv_path: Path,
     new_rows: List[Dict],
