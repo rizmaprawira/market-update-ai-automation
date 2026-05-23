@@ -2,13 +2,16 @@
 import argparse
 import logging
 import sys
+import re
 from pathlib import Path
 from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _downloader_base import (
-    build_session, extract_pdf_links, download_pdf, write_manifest,
-    fetch_html_with_smart_fallback, current_timestamp
+    build_session, download_pdf, write_manifest,
+    fetch_html_with_smart_fallback, current_timestamp, MONTH_NAMES
 )
 
 LOGGER = logging.getLogger("download_pt_axa_mandiri_financial_services")
@@ -16,6 +19,39 @@ SOURCE_URL = "https://www.axa-mandiri.co.id/laporan-keuangan-detail"
 COMPANY_ID = "pt_axa_mandiri_financial_services"
 COMPANY_NAME = "PT AXA Mandiri Financial Services"
 CATEGORY = "asuransi_jiwa"
+
+def extract_axa_mandiri_pdfs(html, base_url, year, month):
+    """Custom extraction for AXA Mandiri with strict month/year validation."""
+    soup = BeautifulSoup(html, 'html.parser')
+    candidates = []
+
+    # Get month names for strict matching
+    month_names = MONTH_NAMES.get(month, [])
+    month_names_lower = [m.lower() for m in month_names]
+
+    for link in soup.find_all('a'):
+        href = link.get('href', '').strip()
+        if not href or not href.lower().endswith('.pdf'):
+            continue
+
+        text = link.get_text(strip=True).lower()
+        url = urljoin(base_url, href)
+        full_text = (text + " " + url.lower()).lower()
+
+        # Strict month matching: must contain full month name, not just a digit
+        has_month = any(month_name in full_text for month_name in month_names_lower)
+        has_year = str(year) in full_text
+
+        # Must match BOTH month and year explicitly
+        if has_month and has_year:
+            score = 100
+            candidates.append({
+                'url': url,
+                'text': link.get_text(strip=True),
+                'score': score
+            })
+
+    return sorted(candidates, key=lambda x: x['score'], reverse=True)
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
@@ -47,7 +83,7 @@ def main():
         html, discovered_url, used_browser = fetch_html_with_smart_fallback(
             session, SOURCE_URL, args.year, args.month, args.timeout
         )
-        candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
+        candidates = extract_axa_mandiri_pdfs(html, discovered_url, args.year, args.month)
 
         if not candidates:
             reason = "no PDF candidates found"
@@ -61,8 +97,8 @@ def main():
             }])
             return 1
 
-        pdf_url = candidates[0].url
-        LOGGER.info(f"Found: {candidates[0].text[:60]}")
+        pdf_url = candidates[0]['url']
+        LOGGER.info(f"Found: {candidates[0]['text'][:60]}")
 
     except Exception as e:
         reason = f"failed to fetch: {e}"
