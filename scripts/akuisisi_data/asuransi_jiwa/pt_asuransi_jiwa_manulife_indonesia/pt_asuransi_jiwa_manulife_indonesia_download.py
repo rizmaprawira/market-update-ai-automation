@@ -24,11 +24,10 @@ COMPANY_NAME = "PT Asuransi Jiwa Manulife Indonesia"
 CATEGORY = "asuransi_jiwa"
 
 def download_pdf_via_playwright(pdf_url, output_path, timeout=30):
-    """Download PDF using Playwright session to bypass 403 blocking."""
+    """Download PDF using Playwright to bypass 403 blocking."""
     if sync_playwright is None:
         raise RuntimeError("Playwright not installed")
 
-    import requests
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context()
@@ -38,25 +37,31 @@ def download_pdf_via_playwright(pdf_url, output_path, timeout=30):
         """)
 
         try:
-            # Load source page to establish session (short timeout, don't wait for networkidle)
+            # Load source page to establish session
             page.goto(SOURCE_URL, timeout=15000, wait_until="domcontentloaded")
             page.wait_for_timeout(1000)
 
-            # Get cookies from session
-            cookies = context.cookies()
-            cookie_dict = {c['name']: c['value'] for c in cookies}
-            headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
+            # Use Playwright's fetch API to download PDF with session cookies
+            response = page.context.request.get(pdf_url, timeout=timeout*1000)
+            if response.status >= 400:
+                LOGGER.error(f"PDF URL returned error status {response.status}")
+                return False
 
-            # Download PDF
-            response = requests.get(pdf_url, cookies=cookie_dict, headers=headers, timeout=timeout)
-            response.raise_for_status()
+            content = response.body()
 
+            # Verify we got a PDF, not an error page
+            if not content.startswith(b'%PDF'):
+                LOGGER.error(f"Downloaded content is not a valid PDF (got {len(content)} bytes, first bytes: {content[:20]})")
+                return False
+
+            # Write PDF to file
             with open(output_path, 'wb') as f:
-                f.write(response.content)
-            LOGGER.info(f"Downloaded {len(response.content)} bytes to {output_path}")
+                f.write(content)
+
+            LOGGER.info(f"Downloaded valid PDF ({len(content)} bytes) to {output_path}")
             return True
         except Exception as e:
-            LOGGER.error(f"Failed to download: {e}")
+            LOGGER.error(f"Failed to download via Playwright: {e}")
             return False
         finally:
             context.close()
@@ -140,7 +145,17 @@ def main():
     
     selected_candidate = candidates[0]
     LOGGER.info(f"Selected: {selected_candidate.text[:60]}")
-    
+
+    if args.discover_only:
+        write_manifest(output_dir, [{
+            "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
+            "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
+            "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+            "output_path": str(output_pdf), "status": "discover_only", "reason": "discover-only mode",
+            "timestamp": current_timestamp()
+        }])
+        return 0
+
     if args.dry_run:
         LOGGER.info(f"Dry-run: would download from {selected_candidate.url}")
         write_manifest(output_dir, [{
