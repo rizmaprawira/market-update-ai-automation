@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _key_metric_helpers import upsert_database_csv, extract_two_numbers_semantic
+from _key_metric_helpers import upsert_database_csv, extract_two_numbers_semantic, get_period_dir
 
 COLUMNS = [
     "periode",
@@ -39,10 +39,10 @@ def main():
     parser = argparse.ArgumentParser(description="Extract Central Asia Jagadiri metrics from TXT file")
     parser.add_argument("--yyyy", type=int, default=2026, help="Year (default: 2026)")
     parser.add_argument("--mm", type=int, default=4, help="Month (default: 4)")
+    parser.add_argument("--output-root", type=str, default="data", help="Output root directory (default: data)")
     args = parser.parse_args()
 
-    PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-    period_dir = PROJECT_ROOT / "data" / f"{args.yyyy}-{args.mm:02d}"
+    period_dir = get_period_dir(args.output_root, args.yyyy, args.mm)
     company_dir = period_dir / "asuransi_jiwa" / "pt_central_asia_financial__jagadiri_"
     INPUT_TXT = company_dir / f"pt_central_asia_financial__jagadiri__{args.yyyy}_{args.mm:02d}.txt"
     COMPANY_CSV = company_dir / f"pt_central_asia_financial__jagadiri__key_metric_{args.yyyy}_{args.mm:02d}.csv"

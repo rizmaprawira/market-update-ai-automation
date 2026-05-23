@@ -470,6 +470,7 @@ if [[ "$FLAG_SKIP_KEY_METRIC" != "true" && "$FLAG_DRY_RUN" != "true" && "$FLAG_D
       env XDG_CACHE_HOME="$MAMBA_CACHE_HOME" mamba run -n market_update python "$script_path"
       --yyyy "$TAHUN"
       --mm "$((10#$BULAN))"
+      --output-root "$OUTPUT_ROOT"
     )
 
     if "${cmd[@]}" >> "$LOG_FILE" 2>&1; then

@@ -5,6 +5,11 @@ from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 
 
+def get_period_dir(output_root: str = "data", yyyy: int = 2026, mm: int = 1) -> Path:
+    """Get period directory, respecting custom output_root."""
+    return Path(output_root) / f"{yyyy}-{mm:02d}"
+
+
 def extract_two_numbers_semantic(
     text: str,
     keywords: List[str],

@@ -24,7 +24,7 @@ COLUMNS = [
 ]
 
 
-def extract_two_numbers(text: str, keywords):
+def extract_two_numbers(text: str, keywords, get_period_dir):
     """
     Extract two numbers using semantic/content-based search.
     Keywords can be a string (for backward compatibility) or list of patterns.
@@ -38,10 +38,11 @@ def main():
     parser = argparse.ArgumentParser(description="Extract MAREIN metrics from TXT file")
     parser.add_argument("--yyyy", type=int, default=2026, help="Year (default: 2026)")
     parser.add_argument("--mm", type=int, default=3, help="Month (default: 3)")
+    parser.add_argument("--output-root", type=str, default="data", help="Output root directory (default: data)")
     args = parser.parse_args()
 
     PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-    period_dir = PROJECT_ROOT / "data" / f"{args.yyyy}-{args.mm:02d}"
+    period_dir = get_period_dir(args.output_root, args.yyyy, args.mm) / f"{args.yyyy}-{args.mm:02d}"
     company_dir = period_dir / "reasuransi" / "pt_maskapai_reasuransi_indonesia"
     INPUT_TXT = company_dir / f"pt_maskapai_reasuransi_indonesia_{args.yyyy}_{args.mm:02d}.txt"
     COMPANY_CSV = company_dir / f"pt_maskapai_reasuransi_indonesia_key_metric_{args.yyyy}_{args.mm:02d}.csv"

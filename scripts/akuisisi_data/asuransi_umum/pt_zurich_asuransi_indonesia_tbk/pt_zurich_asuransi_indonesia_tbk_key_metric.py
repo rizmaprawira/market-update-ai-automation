@@ -6,7 +6,7 @@ from _key_metric_helpers import upsert_database_csv, extract_two_numbers_semanti
 
 COLUMNS = ["periode", "jenis_asuransi", "nama_perusahaan", "aset", "ekuitas", "pendapatan_premi", "premi_bruto", "premi_reasuransi", "premi_neto", "hasil_underwriting", "laba_rugi_komprehensif", "rasio_solvabilitas", "rasio_likuiditas"]
 
-def extract_two_numbers(text: str, keywords):
+def extract_two_numbers(text: str, keywords, get_period_dir):
     if isinstance(keywords, str):
         keywords = [keywords]
     return extract_two_numbers_semantic(text, keywords)
@@ -15,10 +15,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--yyyy", type=int, default=2026)
     parser.add_argument("--mm", type=int, default=4)
+    parser.add_argument("--output-root", type=str, default="data", help="Output root directory (default: data)")
     args = parser.parse_args()
 
     PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-    period_dir = PROJECT_ROOT / "data" / f"{args.yyyy}-{args.mm:02d}"
+    period_dir = get_period_dir(args.output_root, args.yyyy, args.mm) / f"{args.yyyy}-{args.mm:02d}"
     company_dir = period_dir / "asuransi_umum" / "pt_zurich_asuransi_indonesia_tbk"
     INPUT_TXT = company_dir / f"pt_zurich_asuransi_indonesia_tbk_{args.yyyy}_{args.mm:02d}.txt"
     COMPANY_CSV = company_dir / f"pt_zurich_asuransi_indonesia_tbk_key_metric_{args.yyyy}_{args.mm:02d}.csv"
