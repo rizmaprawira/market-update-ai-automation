@@ -2,11 +2,11 @@
 import argparse, csv, re, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _key_metric_helpers import upsert_database_csv, extract_two_numbers_semantic
+from _key_metric_helpers import upsert_database_csv, extract_two_numbers_semantic, get_period_dir
 
 COLUMNS = ["periode", "jenis_asuransi", "nama_perusahaan", "aset", "ekuitas", "pendapatan_premi", "premi_bruto", "premi_reasuransi", "premi_neto", "hasil_underwriting", "laba_rugi_komprehensif", "rasio_solvabilitas", "rasio_likuiditas"]
 
-def extract_two_numbers(text: str, keywords, get_period_dir):
+def extract_two_numbers(text: str, keywords):
     if isinstance(keywords, str):
         keywords = [keywords]
     return extract_two_numbers_semantic(text, keywords)
@@ -19,7 +19,7 @@ def main():
     args = parser.parse_args()
 
     PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-    period_dir = get_period_dir(args.output_root, args.yyyy, args.mm) / f"{args.yyyy}-{args.mm:02d}"
+    period_dir = get_period_dir(args.output_root, args.yyyy, args.mm)
     company_dir = period_dir / "asuransi_umum" / "pt_asuransi_kerugian_jasa_raharja"
     INPUT_TXT = company_dir / f"pt_asuransi_kerugian_jasa_raharja_{args.yyyy}_{args.mm:02d}.txt"
     COMPANY_CSV = company_dir / f"pt_asuransi_kerugian_jasa_raharja_key_metric_{args.yyyy}_{args.mm:02d}.csv"

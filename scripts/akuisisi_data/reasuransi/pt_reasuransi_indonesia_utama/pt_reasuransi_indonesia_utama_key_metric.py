@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _key_metric_helpers import upsert_database_csv, extract_two_numbers_semantic
+from _key_metric_helpers import upsert_database_csv, extract_two_numbers_semantic, get_period_dir
 
 COLUMNS = [
     "periode",
@@ -24,7 +24,7 @@ COLUMNS = [
 ]
 
 
-def extract_two_numbers(text: str, keywords, get_period_dir):
+def extract_two_numbers(text: str, keywords):
     """
     Extract two numbers using semantic/content-based search.
     Keywords can be a string (for backward compatibility) or list of patterns.
@@ -42,7 +42,7 @@ def main():
     args = parser.parse_args()
 
     PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
-    period_dir = get_period_dir(args.output_root, args.yyyy, args.mm) / f"{args.yyyy}-{args.mm:02d}"
+    period_dir = get_period_dir(args.output_root, args.yyyy, args.mm)
     company_dir = period_dir / "reasuransi" / "pt_reasuransi_indonesia_utama"
     INPUT_TXT = company_dir / f"pt_reasuransi_indonesia_utama_{args.yyyy}_{args.mm:02d}.txt"
     COMPANY_CSV = company_dir / f"pt_reasuransi_indonesia_utama_key_metric_{args.yyyy}_{args.mm:02d}.csv"
