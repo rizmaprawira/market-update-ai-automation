@@ -9,9 +9,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from _downloader_base import (
     build_session, extract_pdf_links, download_pdf, write_manifest, write_debug_html,
-    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp,
+    fetch_html_static, fetch_html_with_smart_fallback, current_timestamp,
     MONTH_LABELS
 )
+
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:
+    sync_playwright = None
 
 LOGGER = logging.getLogger("download_pt_asuransi_samsung_tugu")
 SOURCE_URL = "https://www.samsungtugu.com/financial-information"
@@ -19,6 +24,28 @@ COMPANY_ID = "pt_asuransi_samsung_tugu"
 COMPANY_NAME = "PT Asuransi Samsung Tugu"
 CATEGORY = "asuransi_umum"
 
+
+def fetch_samsung_tugu_html(url, timeout=30):
+    """Fetch HTML using Playwright with graceful timeout handling."""
+    if sync_playwright is None:
+        raise RuntimeError("Playwright not installed")
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        try:
+            # Try with domcontentloaded first, ignore timeout if website is slow
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=timeout*1000)
+            except:
+                # If that times out, just wait a bit more and get whatever HTML is there
+                LOGGER.warning(f"Page load slow, waiting extra time...")
+                page.wait_for_timeout(5000)
+
+            html = page.content()
+            return html, url
+        finally:
+            browser.close()
 
 def find_samsung_tugu_pdf(html, year, month):
     """Extract Samsung Tugu PDF link matching pattern: Laporan Keuangan Bulanan - [Month] [Year]"""
@@ -64,8 +91,8 @@ def main():
     LOGGER.info(f"Fetching from {SOURCE_URL}")
 
     try:
-        LOGGER.info("Using Playwright browser rendering (required for Samsung Tugu)")
-        html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
+        LOGGER.info("Using Playwright with domcontentloaded (faster than networkidle)")
+        html, discovered_url = fetch_samsung_tugu_html(SOURCE_URL, args.timeout)
     except Exception as e:
         reason = f"failed to fetch: {e}"
         LOGGER.error(reason)
