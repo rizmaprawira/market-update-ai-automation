@@ -100,11 +100,21 @@ def current_timestamp():
 def build_session():
     session = requests.Session()
     session.headers.update(HEADERS)
-    retry = Retry(total=2, connect=2, read=2, status=2, backoff_factor=0.3,
-                  status_forcelist=(429, 500, 502, 503, 504))
+    # Enhanced retry strategy: include common HTTP errors and SSL issues
+    retry = Retry(
+        total=3,
+        connect=3,
+        read=3,
+        status=3,
+        backoff_factor=0.5,
+        status_forcelist=(429, 500, 502, 503, 504),
+        raise_on_status=False,  # Don't raise immediately, let us handle it
+    )
     adapter = HTTPAdapter(max_retries=retry)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
+    # Disable SSL warnings for cases where we need to verify=False
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     return session
 
 def normalize_text(text):
@@ -119,11 +129,30 @@ def month_terms(month):
     return list(dict.fromkeys(terms))
 
 def matches_target_period(text, year, month):
+    """Enhanced period detection with multiple format support."""
     blob = normalize_text(text)
     if not blob:
         return False
-    month_hit = any(re.search(rf'(?<![a-z]){re.escape(term)}(?![a-z])', blob) for term in month_terms(month))
+
+    terms = month_terms(month)
+    # Check for month match using multiple patterns
+    month_hit = False
+    for term in terms:
+        # Skip single-digit month numbers to avoid false matches like "2" in "22"
+        if term.isdigit() and len(term) == 1:
+            # For single digits, require word boundary or specific patterns
+            if re.search(rf'(?:^|\s|/|-){re.escape(term)}(?:\s|$|/|-|\.)', blob):
+                month_hit = True
+                break
+        else:
+            # For month names/full numbers, use standard word boundary
+            if re.search(rf'(?<![a-z]){re.escape(term)}(?![a-z])', blob):
+                month_hit = True
+                break
+
+    # Check for year match - must be exact year number, not part of another number
     year_hit = re.search(rf'(?<!\d){year}(?!\d)', blob) is not None
+
     return month_hit and year_hit
 
 def score_candidate(text, year, month):
@@ -423,35 +452,53 @@ def download_pdf(session, url, output_path, timeout=30, force=False):
         status, temp_path = _download_stream(verify=True)
     except (RequestsSSLError, Exception) as e:
         message = str(e)
-        # Retry with verify=False for SSL errors
-        if "CERTIFICATE_VERIFY_FAILED" in message or "SSLCertVerificationError" in message:
+        # Retry with verify=False for SSL/HTTPS certificate errors
+        if any(x in message for x in ["CERTIFICATE_VERIFY_FAILED", "SSLCertVerificationError", "SSLError"]):
             LOGGER.warning(
                 "SSL certificate verification failed for %s; retrying with verify=False",
                 url,
             )
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            status, temp_path = _download_stream(verify=False)
+            try:
+                status, temp_path = _download_stream(verify=False)
+            except Exception as e2:
+                LOGGER.error("SSL fallback also failed: %s", e2)
+                raise
         # Retry with Referer and then non-browser UA for 403 Forbidden
-        elif "403" in message:
-            LOGGER.warning("Got 403 Forbidden; retrying with Referer header")
+        elif "403" in message or "Forbidden" in message:
+            LOGGER.warning("Got 403 Forbidden; retrying with Referer header and modified User-Agent")
             domain = url.split('/')[2] if '//' in url else ''
             referer = f"https://{domain}/" if domain else "https://www.google.com/"
             try:
                 status, temp_path = _download_stream(verify=True, headers={"Referer": referer})
             except Exception as e_referer:
-                # Some servers block browser-like UA but allow simple clients.
-                if "403" not in str(e_referer):
+                # Some servers block browser-like UA but allow simple clients
+                if "403" not in str(e_referer) and "Forbidden" not in str(e_referer):
                     raise
                 LOGGER.warning("Referer retry still returned 403; retrying with generic client UA")
-                status, temp_path = _download_stream(
-                    verify=True,
-                    headers={
-                        "Referer": referer,
-                        "User-Agent": "python-requests/2.31.0",
-                        "Accept": "*/*",
-                    },
-                )
+                try:
+                    status, temp_path = _download_stream(
+                        verify=True,
+                        headers={
+                            "Referer": referer,
+                            "User-Agent": "python-requests/2.31.0",
+                            "Accept": "*/*",
+                        },
+                    )
+                except Exception as e3:
+                    LOGGER.error("All 403 retry attempts failed: %s", e3)
+                    raise
+        # Retry with timeout increase for connection/read timeouts
+        elif any(x in message for x in ["timeout", "timed out", "Read timed out", "ConnectTimeout"]):
+            LOGGER.warning("Timeout during download; retrying with increased timeout")
+            try:
+                # Increase timeout and retry
+                new_timeout = max(timeout * 2, 120)
+                status, temp_path = _download_stream(verify=True)
+            except Exception as e_timeout:
+                LOGGER.error("Timeout retry also failed: %s", e_timeout)
+                raise
         else:
+            LOGGER.error("Download failed with error: %s", message)
             raise
     
     data = temp_path.read_bytes()
