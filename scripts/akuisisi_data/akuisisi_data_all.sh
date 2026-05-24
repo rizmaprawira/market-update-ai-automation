@@ -172,15 +172,18 @@ if [[ -z "$TAHUN" || -z "$BULAN" ]]; then
   exit 1
 fi
 
+# Normalize month to zero-padded format (01-12)
+BULAN=$(printf '%02d' "$((10#$BULAN))")
+
 # Create period directory and log file
-PERIOD_DIR="$OUTPUT_ROOT/$TAHUN-$(printf '%02d' "$BULAN")"
+PERIOD_DIR="$OUTPUT_ROOT/$TAHUN-$(printf '%02d' "$((10#$BULAN))")"
 mkdir -p "$PERIOD_DIR"
 LOG_FILE="$PERIOD_DIR/akuisisi_all.log"
 
 log "INFO" "=========================================="
 log "INFO" "Starting Unified Data Acquisition Pipeline"
 log "INFO" "=========================================="
-log "INFO" "Period: $TAHUN-$(printf '%02d' "$BULAN")"
+log "INFO" "Period: $TAHUN-$(printf '%02d' "$((10#$BULAN))")"
 log "INFO" "Output Root: $OUTPUT_ROOT"
 log "INFO" ""
 
