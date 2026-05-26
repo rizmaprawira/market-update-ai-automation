@@ -27,9 +27,20 @@ def extract_pdfs(html, base_url, year, month):
             continue
         text = link.get_text(strip=True).lower()
         url = urljoin(base_url, href)
+
+        # Check in link text and URL
         full_text = (text + " " + url.lower()).lower()
         has_month = any(month_name in full_text for month_name in month_names_lower)
         has_year = str(year) in full_text
+
+        # If not found in link text, check parent table row for month description
+        if not has_month:
+            parent_tr = link.find_parent('tr')
+            if parent_tr:
+                tr_text = parent_tr.get_text().lower()
+                has_month = any(month_name in tr_text for month_name in month_names_lower)
+                has_year = str(year) in tr_text or has_year
+
         if has_month and has_year:
             candidates.append({'url': url, 'text': link.get_text(strip=True), 'score': 100})
     return sorted(candidates, key=lambda x: x['score'], reverse=True)
