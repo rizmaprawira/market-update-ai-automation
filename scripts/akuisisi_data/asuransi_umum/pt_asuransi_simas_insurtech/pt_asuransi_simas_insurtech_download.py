@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from _downloader_base import (
     build_session, extract_pdf_links, download_pdf, write_manifest, write_debug_html,
-    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp
+    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp, MONTH_LABELS
 )
 
 LOGGER = logging.getLogger("download_pt_asuransi_simas_insurtech")
@@ -18,6 +18,62 @@ FALLBACK_URL = "https://simasinsurtech.com/tentang-kami/laporan-keuangan-simasin
 COMPANY_ID = "pt_asuransi_simas_insurtech"
 COMPANY_NAME = "PT Asuransi Simas Insurtech"
 CATEGORY = "asuransi_umum"
+
+MONTH_NAMES_ID = {
+    1: "Januari", 2: "Februari", 3: "Maret", 4: "April", 5: "Mei", 6: "Juni",
+    7: "Juli", 8: "Agustus", 9: "September", 10: "Oktober", 11: "November", 12: "Desember"
+}
+
+def fetch_simas_with_dropdown_selection(source_url, year, month, timeout):
+    """Fetch Simas Insurtech PDF URL by selecting year and month dropdowns."""
+    from playwright.sync_api import sync_playwright
+    import tempfile
+    import os
+
+    month_name = MONTH_NAMES_ID[month]
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(accept_downloads=True)
+            page = context.new_page()
+
+            try:
+                page.goto(source_url, wait_until="networkidle", timeout=timeout * 1000)
+
+                LOGGER.info("Scrolling down to find dropdown section")
+                page.evaluate("window.scrollBy(0, 2000)")
+                page.wait_for_timeout(1500)
+
+                LOGGER.info(f"Selecting year: {year}")
+                year_select = page.locator("select").first
+                year_select.select_option(value=str(year))
+                page.wait_for_timeout(1000)
+
+                LOGGER.info(f"Selecting month: {month_name}")
+                month_select = page.locator("select").nth(1)
+                month_select.select_option(value=month_name)
+                page.wait_for_timeout(1000)
+
+                LOGGER.info("Clicking Download button")
+                download_button = page.locator("button, a").filter(has_text="Download").first
+
+                with page.expect_download() as download_info:
+                    download_button.click()
+
+                download = download_info.value
+                download_path = download.path()
+                pdf_url = download.url
+
+                LOGGER.info(f"PDF downloaded to: {download_path}")
+                LOGGER.info(f"PDF URL: {pdf_url}")
+
+                browser.close()
+                return pdf_url
+            except Exception as e:
+                LOGGER.error(f"Error fetching with dropdowns: {e}")
+                browser.close()
+                raise
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
@@ -44,32 +100,22 @@ def main():
     output_pdf = output_dir / f"{COMPANY_ID}_{args.year:04d}_{args.month:02d}.pdf"
     debug_dir = output_dir / "_debug_html"
 
-    html = None
     discovered_url = SOURCE_URL
+    pdf_url = None
     fetch_error = None
 
     LOGGER.info(f"Fetching from {SOURCE_URL}")
 
     try:
-        if args.use_browser:
-            LOGGER.info("Using Playwright browser rendering")
-            html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
-        else:
-            html, discovered_url, used_browser = fetch_html_with_smart_fallback(
-                session, SOURCE_URL, args.year, args.month, args.timeout
-            )
+        LOGGER.info("Using Playwright with dropdown selection")
+        pdf_url = fetch_simas_with_dropdown_selection(SOURCE_URL, args.year, args.month, args.timeout)
     except Exception as e:
         fetch_error = str(e)
         LOGGER.warning(f"Primary URL failed: {fetch_error}")
         if SOURCE_URL != FALLBACK_URL:
             LOGGER.info(f"Trying fallback URL: {FALLBACK_URL}")
             try:
-                if args.use_browser:
-                    html, discovered_url = fetch_html_browser(FALLBACK_URL, args.timeout)
-                else:
-                    html, discovered_url, used_browser = fetch_html_with_smart_fallback(
-                        session, FALLBACK_URL, args.year, args.month, args.timeout
-                    )
+                pdf_url = fetch_simas_with_dropdown_selection(FALLBACK_URL, args.year, args.month, args.timeout)
                 fetch_error = None
             except Exception as e2:
                 fetch_error = str(e2)
@@ -88,13 +134,9 @@ def main():
             }])
             return 1
 
-    candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
-
-    if not candidates:
-        reason = "no PDF candidates found"
+    if not pdf_url:
+        reason = "no PDF URL found"
         LOGGER.warning(reason)
-        if args.debug_html:
-            write_debug_html(debug_dir, html, reason)
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
@@ -104,26 +146,25 @@ def main():
         }])
         return 1
 
-    selected_candidate = candidates[0]
-    LOGGER.info(f"Selected: {selected_candidate.text[:60]}")
+    LOGGER.info(f"Selected: {pdf_url}")
 
     if args.discover_only:
         LOGGER.info("Discovery complete (--discover-only mode)")
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-            "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+            "pdf_url": pdf_url, "target_year": args.year, "target_month": args.month,
             "output_path": str(output_pdf), "status": "discover_only", "reason": "discovery complete",
             "timestamp": current_timestamp()
         }])
         return 0
 
     if args.dry_run:
-        LOGGER.info(f"Dry-run: would download from {selected_candidate.url}")
+        LOGGER.info(f"Dry-run: would download from {pdf_url}")
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-            "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+            "pdf_url": pdf_url, "target_year": args.year, "target_month": args.month,
             "output_path": str(output_pdf), "status": "dry_run", "reason": "dry-run mode",
             "timestamp": current_timestamp()
         }])
@@ -134,14 +175,14 @@ def main():
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-            "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+            "pdf_url": pdf_url, "target_year": args.year, "target_month": args.month,
             "output_path": str(output_pdf), "status": "skipped_existing", "reason": "file exists",
             "timestamp": current_timestamp()
         }])
         return 0
 
     http_status, file_size = download_pdf(
-        session, selected_candidate.url, output_pdf, timeout=args.timeout, force=args.force
+        session, pdf_url, output_pdf, timeout=args.timeout, force=args.force
     )
 
     status = "downloaded" if http_status is not None else "skipped_existing"
@@ -154,7 +195,7 @@ def main():
     write_manifest(output_dir, [{
         "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
         "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-        "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+        "pdf_url": pdf_url, "target_year": args.year, "target_month": args.month,
         "output_path": str(output_pdf), "status": status, "reason": reason,
         "timestamp": current_timestamp()
     }])
