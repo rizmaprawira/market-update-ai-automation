@@ -556,6 +556,36 @@ if [[ "$FLAG_SKIP_KEY_METRIC" != "true" && "$FLAG_DRY_RUN" != "true" && "$FLAG_D
 fi
 
 # ============================================================================
+# PHASE 4: Rebuild Database from All Available Metric CSVs
+# ============================================================================
+if [[ "$FLAG_SKIP_KEY_METRIC" != "true" && "$FLAG_DRY_RUN" != "true" && "$FLAG_DISCOVER_ONLY" != "true" ]]; then
+  log "INFO" "PHASE 4: Rebuilding database from all available metric CSVs..."
+  log "INFO" "======================================================================="
+
+  DATABASE_CSV="${PERIOD_DIR}/database_asuransi_jiwa_${TAHUN}_${BULAN}.csv"
+
+  mapfile -t ALL_METRIC_CSVS < <(find "${PERIOD_DIR}/asuransi_jiwa" -name "*_key_metric_${TAHUN}_${BULAN}.csv" 2>/dev/null | sort)
+
+  if [[ "${#ALL_METRIC_CSVS[@]}" -eq 0 ]]; then
+    log "WARN" "No metric CSVs found - skipping database rebuild"
+  else
+    header=$(head -1 "${ALL_METRIC_CSVS[0]}")
+    echo "$header" > "$DATABASE_CSV"
+
+    DB_ROW_COUNT=0
+    for csv_file in "${ALL_METRIC_CSVS[@]}"; do
+      row_count=$(tail -n +2 "$csv_file" | wc -l | tr -d ' ')
+      tail -n +2 "$csv_file" >> "$DATABASE_CSV"
+      DB_ROW_COUNT=$((DB_ROW_COUNT + row_count))
+    done
+
+    log "INFO" "Database rebuilt: ${#ALL_METRIC_CSVS[@]} companies, ${DB_ROW_COUNT} data rows -> $DATABASE_CSV"
+  fi
+
+  log "INFO" ""
+fi
+
+# ============================================================================
 # FINAL SUMMARY
 # ============================================================================
 log "INFO" "======================================================================"
