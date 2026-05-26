@@ -4,31 +4,30 @@ import logging
 import sys
 import re
 from pathlib import Path
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _downloader_base import (
     build_session, download_pdf, write_manifest,
-    current_timestamp, MONTH_NAMES, fetch_html_static, extract_pdf_links
+    current_timestamp, MONTH_NAMES
 )
 
 LOGGER = logging.getLogger("download_pt_axa_mandiri_financial_services")
-SOURCE_URL = "https://www.axa-mandiri.co.id/laporan-keuangan-detail"
+SOURCE_URL = "https://www.axa-mandiri.co.id/laporan-keuangan-detail?tab=keuangan"
 COMPANY_ID = "pt_axa_mandiri_financial_services"
 COMPANY_NAME = "PT AXA Mandiri Financial Services"
 CATEGORY = "asuransi_jiwa"
 
 def extract_axa_mandiri_pdfs(html, base_url, year, month):
-    """Extract PDFs from AXA Mandiri - matches financial reports or market updates by date."""
+    """Extract PDFs from gallery in AXA Mandiri financial reports page."""
     soup = BeautifulSoup(html, 'html.parser')
     candidates = []
 
     month_names = MONTH_NAMES.get(month, [])
     month_names_lower = [m.lower() for m in month_names]
 
-    # Normalize month label
     month_labels = {
         1: "januari", 2: "februari", 3: "maret", 4: "april", 5: "mei",
         6: "juni", 7: "juli", 8: "agustus", 9: "september",
@@ -36,63 +35,83 @@ def extract_axa_mandiri_pdfs(html, base_url, year, month):
     }
     month_label = month_labels.get(month, "").lower()
 
+    # Find all PDF download links in the page
     for link in soup.find_all('a'):
         href = link.get('href', '').strip()
-        if not href:
-            continue
-
-        # Check if href points to a PDF (with or without query parameters)
-        href_lower = href.lower()
-        if '.pdf' not in href_lower:
+        if not href or '.pdf' not in href.lower():
             continue
 
         text = link.get_text(strip=True).lower()
         url = urljoin(base_url, href)
-        # Use URL for matching instead of text for better month detection
-        match_text = url.lower()
+        match_text = (text + " " + url).lower()
 
-        # Look for month and year in URL path/filename
-        has_month = any(f"-{m}-" in match_text or f"_{m}_" in match_text or f" {m} " in match_text
-                       or match_text.endswith(m) or match_text.startswith(m)
-                       for m in month_names_lower) or month_label in match_text
+        # Match month and year in text
+        has_month = any(m in match_text for m in month_names_lower) or month_label in match_text
         has_year = str(year) in match_text
 
         if has_month and has_year:
-            score = 100
             candidates.append({
                 'url': url,
                 'text': link.get_text(strip=True),
-                'score': score
+                'score': 100
             })
 
     return sorted(candidates, key=lambda x: x['score'], reverse=True)
 
 def fetch_axa_mandiri_html(url, year, month, timeout=30):
-    """Fetch HTML for AXA Mandiri using simple browser rendering without complex interactions."""
-    try:
-        html, _ = fetch_html_static(build_session(), url, timeout)
-        candidates = extract_axa_mandiri_pdfs(html, url, year, month)
-        if candidates:
-            return html, url, False
-        LOGGER.info("No PDFs in static HTML, using browser rendering")
-    except Exception as e:
-        LOGGER.info(f"Static fetch failed: {e}")
-        html = ""
+    """Fetch financial reports from AXA Mandiri with form interaction."""
+    month_labels = {
+        1: "januari", 2: "februari", 3: "maret", 4: "april", 5: "mei",
+        6: "juni", 7: "juli", 8: "agustus", 9: "september",
+        10: "oktober", 11: "november", 12: "desember"
+    }
 
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        try:
+            LOGGER.info("Navigating to financial reports page with form filters")
+            page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
+            page.wait_for_timeout(1500)
+
+            # Select "Konvensional" in first dropdown
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
-                page.wait_for_timeout(2000)
-                html = page.content()
-                return html, page.url, True
-            finally:
-                browser.close()
-    except Exception as e:
-        LOGGER.error(f"Browser fetch failed: {e}")
-        raise RuntimeError(f"Unable to fetch {url}: {e}")
+                page.click("select:first-of-type")
+                page.wait_for_timeout(500)
+                page.click("select:first-of-type option[value='konvensional'], select:first-of-type option:has-text('Konvensional')")
+                LOGGER.debug("Selected Konvensional")
+            except Exception as e:
+                LOGGER.debug(f"Could not select Konvensional: {e}")
+
+            # Select year in second dropdown
+            try:
+                page.click("select:nth-of-type(2)")
+                page.wait_for_timeout(500)
+                page.click(f"select:nth-of-type(2) option[value='{year}'], select:nth-of-type(2) option:has-text('{year}')")
+                LOGGER.debug(f"Selected year {year}")
+            except Exception as e:
+                LOGGER.debug(f"Could not select year: {e}")
+
+            # Click Submit button
+            try:
+                submit_btn = page.locator("button:has-text('Submit'), button:text('Submit')")
+                if submit_btn.count() > 0:
+                    submit_btn.first.click()
+                    LOGGER.debug("Clicked Submit button")
+                    page.wait_for_timeout(2000)
+            except Exception as e:
+                LOGGER.debug(f"Could not click Submit: {e}")
+
+            # Wait for gallery to load and stabilize
+            page.wait_for_timeout(2000)
+            html = page.content()
+            return html, page.url, True
+
+        except Exception as e:
+            LOGGER.error(f"Failed to fetch with form interaction: {e}")
+            raise RuntimeError(f"Unable to fetch reports: {e}")
+        finally:
+            browser.close()
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")

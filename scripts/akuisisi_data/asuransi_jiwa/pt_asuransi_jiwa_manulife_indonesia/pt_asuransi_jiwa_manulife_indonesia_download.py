@@ -1,14 +1,9 @@
-"""Download financial reports for PT Asuransi Jiwa Manulife Indonesia.
-
-NOTE: Manulife's website (manulife.co.id) is protected by Akamai WAF which blocks
-automated downloads. Both cloudscraper and Playwright methods will fail with 403.
-As of 2026-05-26, no bypass is available. PDFs must be downloaded manually from:
-https://www.manulife.co.id/id/tentang-kami/laporan-keuangan.html
-"""
+"""Download financial reports for PT Asuransi Jiwa Manulife Indonesia."""
 import argparse
 import logging
 import sys
 import requests
+import re
 from pathlib import Path
 from calendar import month_name
 from bs4 import BeautifulSoup
@@ -35,16 +30,76 @@ COMPANY_ID = "pt_asuransi_jiwa_manulife_indonesia"
 COMPANY_NAME = "PT Asuransi Jiwa Manulife Indonesia"
 CATEGORY = "asuransi_jiwa"
 
-def download_pdf_via_cloudscraper(pdf_url, output_path, timeout=30):
-    """Download PDF using cloudscraper to bypass Akamai WAF."""
-    if cloudscraper is None:
-        LOGGER.warning("cloudscraper not available, falling back to Playwright")
-        return False
-
+def find_manulife_pdf_from_archive(year, month):
+    """Find Manulife PDF URL from archive.org (fallback for Akamai WAF blocks)."""
     try:
-        scraper = cloudscraper.create_scraper()
-        LOGGER.info(f"Downloading PDF via cloudscraper: {pdf_url}")
-        response = scraper.get(pdf_url, timeout=timeout)
+        month_names_id = {
+            1: "Januari", 2: "Februari", 3: "Maret", 4: "April",
+            5: "Mei", 6: "Juni", 7: "Juli", 8: "Agustus",
+            9: "September", 10: "Oktober", 11: "November", 12: "Desember"
+        }
+        target_month = month_names_id.get(month)
+        target_year = str(year)
+
+        LOGGER.info("Trying Archive.org as fallback (main site blocked by Akamai WAF)...")
+
+        # Get latest snapshot info from archive.org
+        api_url = "https://web.archive.org/web/timemap/json?url=manulife.co.id/id/tentang-kami/laporan-keuangan.html"
+        r = requests.get(api_url, timeout=10)
+
+        if r.status_code != 200:
+            LOGGER.warning("Could not access Archive.org API")
+            return None
+
+        snapshots = r.json()
+        if len(snapshots) < 2:
+            LOGGER.warning("No Archive.org snapshots available")
+            return None
+
+        # Try most recent snapshot
+        latest_timestamp = snapshots[-1][1]
+        LOGGER.info(f"Trying Archive.org snapshot from {latest_timestamp}")
+
+        snapshot_url = f"https://web.archive.org/web/{latest_timestamp}/manulife.co.id/id/tentang-kami/laporan-keuangan.html"
+        r = requests.get(snapshot_url, timeout=15)
+
+        if r.status_code != 200:
+            LOGGER.warning(f"Archive snapshot returned {r.status_code}")
+            return None
+
+        # Extract PDF paths
+        pdf_pattern = r'(/content/dam/insurance/id/documents/[^"\'<>\s]*bulanan-konvensional[^"\'<>\s]*\.pdf)'
+        pdf_paths = list(set(re.findall(pdf_pattern, r.text)))
+
+        LOGGER.info(f"Found {len(pdf_paths)} monthly conventional PDFs in archive")
+
+        # Find matching month/year
+        for pdf_path in pdf_paths:
+            path_lower = pdf_path.lower()
+            if target_month.lower() in path_lower and target_year in path_lower:
+                archive_url = f"https://web.archive.org/web/{latest_timestamp}/manulife.co.id{pdf_path}"
+                LOGGER.info(f"Found matching PDF in archive: {pdf_path[-50:]}")
+                return archive_url
+
+        LOGGER.warning(f"No matching PDF found for {target_month} {target_year} in archive")
+        if pdf_paths:
+            LOGGER.info(f"Available: {pdf_paths[0][-60:]}")
+        return None
+
+    except Exception as e:
+        LOGGER.warning(f"Archive.org lookup failed: {e}")
+        return None
+
+def download_pdf_via_requests(pdf_url, output_path, timeout=30):
+    """Download PDF via requests library (best for Archive.org)."""
+    try:
+        LOGGER.info(f"Downloading PDF via requests: {pdf_url[:80]}...")
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+
+        response = session.get(pdf_url, timeout=timeout, allow_redirects=True)
 
         if response.status_code >= 400:
             LOGGER.error(f"PDF URL returned error status {response.status_code}")
@@ -55,6 +110,38 @@ def download_pdf_via_cloudscraper(pdf_url, output_path, timeout=30):
         # Verify we got a PDF, not an error page
         if not content.startswith(b'%PDF'):
             LOGGER.error(f"Downloaded content is not a valid PDF (got {len(content)} bytes, first bytes: {content[:20]})")
+            return False
+
+        # Write PDF to file
+        with open(output_path, 'wb') as f:
+            f.write(content)
+
+        LOGGER.info(f"Downloaded valid PDF ({len(content)} bytes) to {output_path}")
+        return True
+    except Exception as e:
+        LOGGER.error(f"Failed to download via requests: {e}")
+        return False
+
+def download_pdf_via_cloudscraper(pdf_url, output_path, timeout=30):
+    """Download PDF using cloudscraper to bypass Akamai WAF."""
+    if cloudscraper is None:
+        LOGGER.warning("cloudscraper not available, falling back to other methods")
+        return False
+
+    try:
+        scraper = cloudscraper.create_scraper()
+        LOGGER.info(f"Downloading PDF via cloudscraper: {pdf_url[:80]}...")
+        response = scraper.get(pdf_url, timeout=timeout)
+
+        if response.status_code >= 400:
+            LOGGER.error(f"PDF URL returned error status {response.status_code}")
+            return False
+
+        content = response.content
+
+        # Verify we got a PDF, not an error page
+        if not content.startswith(b'%PDF'):
+            LOGGER.error(f"Downloaded content is not a valid PDF (got {len(content)} bytes)")
             return False
 
         # Write PDF to file
@@ -252,16 +339,23 @@ def main():
     pdf_url = find_manulife_pdf_url(args.year, args.month)
     discovered_url = SOURCE_URL
 
+    # If main website is blocked, try Archive.org
+    if not pdf_url:
+        LOGGER.info("Main website inaccessible, trying Archive.org fallback...")
+        pdf_url = find_manulife_pdf_from_archive(args.year, args.month)
+        if pdf_url:
+            discovered_url = "https://web.archive.org (Akamai WAF bypass)"
+
     # Create a simple candidate object
     class Candidate:
         def __init__(self, url):
             self.url = url
-            self.text = "PDF (found via website scraping)"
+            self.text = "PDF (found via website scraping or archive)"
 
     candidates = [Candidate(pdf_url)] if pdf_url else []
 
     if not candidates:
-        reason = "Website blocked by Akamai WAF - manual download required"
+        reason = "PDF not found in website or Archive.org - may not exist for this period"
         LOGGER.warning(reason)
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
@@ -307,15 +401,19 @@ def main():
         }])
         return 0
     
-    # Download using cloudscraper (better Akamai WAF support) or Playwright
+    # Download PDF - try best method for the source
     try:
         output_pdf.parent.mkdir(parents=True, exist_ok=True)
 
-        # Try cloudscraper first (better for Akamai WAF)
-        success = download_pdf_via_cloudscraper(selected_candidate.url, str(output_pdf), args.timeout)
+        # For Archive.org URLs, use requests directly (faster and more reliable)
+        if 'archive.org' in selected_candidate.url:
+            success = download_pdf_via_requests(selected_candidate.url, str(output_pdf), args.timeout)
+        else:
+            # For main website, try cloudscraper first (better for Akamai WAF)
+            success = download_pdf_via_cloudscraper(selected_candidate.url, str(output_pdf), args.timeout)
 
-        if not success:
-            # Fall back to Playwright
+        if not success and 'archive.org' not in selected_candidate.url:
+            # Fall back to Playwright for main website
             LOGGER.info("Cloudscraper failed, trying Playwright...")
             success = download_pdf_via_playwright(selected_candidate.url, str(output_pdf), args.timeout)
 
