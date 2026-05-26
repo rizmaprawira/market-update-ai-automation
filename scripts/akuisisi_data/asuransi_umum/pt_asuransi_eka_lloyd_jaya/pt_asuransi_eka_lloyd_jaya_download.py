@@ -14,7 +14,7 @@ from _downloader_base import (
 )
 
 LOGGER = logging.getLogger("download_pt_asuransi_eka_lloyd_jaya")
-SOURCE_URL = "https://ekalloyd.id/laporan-keuangan/"
+SOURCE_URL = "https://ekalloyd.com/laporan-keuangan/"
 COMPANY_ID = "pt_asuransi_eka_lloyd_jaya"
 COMPANY_NAME = "PT Asuransi Eka Lloyd Jaya"
 CATEGORY = "asuransi_umum"
