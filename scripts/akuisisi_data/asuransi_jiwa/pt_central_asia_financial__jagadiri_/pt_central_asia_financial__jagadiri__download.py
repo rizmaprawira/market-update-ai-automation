@@ -47,8 +47,24 @@ def fetch_jagadiri_pdfs(year, month, timeout=30):
                 if rel_pdf.startswith('/'):
                     pdf_urls.append(f"https://jagadiri.co.id{rel_pdf}")
 
-            # Filter by year and month with strict validation
-            month_keywords = [month_name[month].lower(), str(month).zfill(2)]
+            # JAGADIRI uses Indonesian month names in URLs
+            # Map month numbers to Indonesian month names
+            indonesian_months = {
+                1: ['januari', 'jan'],
+                2: ['februari', 'feb'],
+                3: ['maret', 'mar'],
+                4: ['april', 'apr'],
+                5: ['mei'],
+                6: ['juni', 'jun'],
+                7: ['juli', 'jul'],
+                8: ['agustus', 'agu'],
+                9: ['september', 'sep'],
+                10: ['oktober', 'okt'],
+                11: ['november', 'nov'],
+                12: ['desember', 'des']
+            }
+
+            month_keywords = indonesian_months.get(month, [])
             matching_pdfs = []
 
             for url in pdf_urls:
@@ -74,27 +90,27 @@ def download_pdf_via_playwright(pdf_url, output_path, timeout=30):
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page(
+        context = browser.new_context(
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
         )
+        page = context.new_page()
 
         try:
-            response = page.goto(pdf_url, timeout=timeout * 1000, wait_until="commit")
-            page.wait_for_timeout(2000)
+            # Expect download when navigating to PDF URL
+            with page.expect_download() as download_info:
+                page.goto(pdf_url, timeout=timeout * 1000, wait_until="commit")
 
-            if response.status == 200:
-                pdf_bytes = page.pdf()
-                with open(output_path, 'wb') as f:
-                    f.write(pdf_bytes)
-                LOGGER.info(f"Downloaded {len(pdf_bytes)} bytes via Playwright")
-                return True
-            else:
-                LOGGER.error(f"HTTP {response.status} from {pdf_url}")
-                return False
+            download = download_info.value
+            download.save_as(output_path)
+
+            file_size = Path(output_path).stat().st_size
+            LOGGER.info(f"Downloaded {file_size} bytes via Playwright")
+            return True
         except Exception as e:
             LOGGER.error(f"Playwright fetch failed: {e}")
             return False
         finally:
+            context.close()
             browser.close()
 
 def main():

@@ -1,4 +1,4 @@
-"""Download financial reports for PT Asuransi Allianz Utama Indonesia."""
+"""Download financial reports for PT Asuransi Jiwa Sequis Life."""
 import argparse
 import logging
 import sys

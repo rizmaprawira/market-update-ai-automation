@@ -4,14 +4,14 @@ import logging
 import sys
 import re
 from pathlib import Path
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _downloader_base import (
     build_session, download_pdf, write_manifest,
-    fetch_html_with_smart_fallback, current_timestamp, MONTH_NAMES
+    current_timestamp, MONTH_NAMES, fetch_html_static, extract_pdf_links
 )
 
 LOGGER = logging.getLogger("download_pt_axa_mandiri_financial_services")
@@ -21,11 +21,10 @@ COMPANY_NAME = "PT AXA Mandiri Financial Services"
 CATEGORY = "asuransi_jiwa"
 
 def extract_axa_mandiri_pdfs(html, base_url, year, month):
-    """Custom extraction for AXA Mandiri with strict month/year validation."""
+    """Custom extraction for AXA Mandiri with flexible matching."""
     soup = BeautifulSoup(html, 'html.parser')
     candidates = []
 
-    # Get month names for strict matching
     month_names = MONTH_NAMES.get(month, [])
     month_names_lower = [m.lower() for m in month_names]
 
@@ -38,13 +37,22 @@ def extract_axa_mandiri_pdfs(html, base_url, year, month):
         url = urljoin(base_url, href)
         full_text = (text + " " + url.lower()).lower()
 
-        # Strict month matching: must contain full month name, not just a digit
+        # Check if PDF looks like a financial report
+        is_financial = any(term in full_text for term in ['laporan', 'keuangan', 'financial', 'report'])
         has_month = any(month_name in full_text for month_name in month_names_lower)
         has_year = str(year) in full_text
 
-        # Must match BOTH month and year explicitly
+        score = 0
         if has_month and has_year:
             score = 100
+        elif is_financial and has_year and has_month:
+            score = 90
+        elif is_financial and has_year:
+            score = 50
+        elif has_month and has_year:
+            score = 80
+
+        if score > 0:
             candidates.append({
                 'url': url,
                 'text': link.get_text(strip=True),
@@ -52,6 +60,33 @@ def extract_axa_mandiri_pdfs(html, base_url, year, month):
             })
 
     return sorted(candidates, key=lambda x: x['score'], reverse=True)
+
+def fetch_axa_mandiri_html(url, year, month, timeout=30):
+    """Fetch HTML for AXA Mandiri using simple browser rendering without complex interactions."""
+    try:
+        html, _ = fetch_html_static(build_session(), url, timeout)
+        candidates = extract_axa_mandiri_pdfs(html, url, year, month)
+        if candidates:
+            return html, url, False
+        LOGGER.info("No PDFs in static HTML, using browser rendering")
+    except Exception as e:
+        LOGGER.info(f"Static fetch failed: {e}")
+        html = ""
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
+                page.wait_for_timeout(2000)
+                html = page.content()
+                return html, page.url, True
+            finally:
+                browser.close()
+    except Exception as e:
+        LOGGER.error(f"Browser fetch failed: {e}")
+        raise RuntimeError(f"Unable to fetch {url}: {e}")
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
@@ -80,8 +115,8 @@ def main():
     LOGGER.info(f"Discovering PDF for {period}")
 
     try:
-        html, discovered_url, used_browser = fetch_html_with_smart_fallback(
-            session, SOURCE_URL, args.year, args.month, args.timeout
+        html, discovered_url, used_browser = fetch_axa_mandiri_html(
+            SOURCE_URL, args.year, args.month, args.timeout
         )
         candidates = extract_axa_mandiri_pdfs(html, discovered_url, args.year, args.month)
 

@@ -24,71 +24,122 @@ COMPANY_NAME = "PT Asuransi Jiwa IFG"
 CATEGORY = "asuransi_jiwa"
 
 def download_pdf_via_playwright(pdf_url, output_path, timeout=30):
-    """Download PDF using Playwright session to bypass IFG's 403 blocking."""
+    """Download PDF by having visible browser navigate and using JavaScript fetch."""
     if sync_playwright is None:
         raise RuntimeError("Playwright not installed")
 
-    import requests
+    import tempfile
+    import shutil
+    import time
+    from pathlib import Path
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
-        context = browser.new_context()
-        page = context.new_page()
-        page.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {get: () => false});
-        """)
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=False)
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            )
+            page = context.new_page()
 
-        try:
-            # Load a page to establish session/cookies
-            page.goto(SOURCE_URL, timeout=timeout * 1000)
-            page.wait_for_load_state("networkidle", timeout=timeout * 1000)
+            LOGGER.info(f"Downloading PDF via browser: {pdf_url[:80]}...")
 
-            # Get cookies and headers from the session
-            cookies = context.cookies()
-            cookie_dict = {c['name']: c['value'] for c in cookies}
-            headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
+            # Use JavaScript to fetch PDF and trigger download via data URL
+            js_code = f"""
+            (async () => {{
+                try {{
+                    const response = await fetch('{pdf_url}', {{
+                        credentials: 'include',
+                        headers: {{'Referer': '{SOURCE_URL}'}}
+                    }});
+                    if (!response.ok) throw new Error('HTTP ' + response.status);
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'report.pdf';
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    a.remove();
+                    return 'success';
+                }} catch (e) {{
+                    return 'error: ' + e.message;
+                }}
+            }})()
+            """
 
-            # Download PDF using requests with session cookies
-            response = requests.get(pdf_url, cookies=cookie_dict, headers=headers, timeout=timeout)
-            response.raise_for_status()
+            # Navigate to the page first
+            page.goto(SOURCE_URL, wait_until="domcontentloaded", timeout=timeout * 1000)
+            page.wait_for_timeout(1000)
 
-            with open(output_path, 'wb') as f:
-                f.write(response.content)
-            LOGGER.info(f"Downloaded {len(response.content)} bytes to {output_path}")
-            return True
-        except Exception as e:
-            LOGGER.error(f"Failed to download: {e}")
-            return False
-        finally:
-            context.close()
-            browser.close()
+            # Execute the fetch/download script
+            try:
+                with page.expect_download(timeout=timeout * 1000) as download_info:
+                    result = page.evaluate(js_code)
+                    LOGGER.debug(f"JavaScript fetch result: {result}")
+
+                download = download_info.value
+
+                # Save the downloaded file
+                output_file = Path(output_path)
+                output_file.parent.mkdir(parents=True, exist_ok=True)
+                download.save_as(str(output_file))
+
+                if output_file.exists():
+                    file_size = output_file.stat().st_size
+                    LOGGER.info(f"Downloaded {file_size} bytes to {output_path}")
+                    context.close()
+                    browser.close()
+                    return True
+                else:
+                    LOGGER.error("Download file not saved")
+                    context.close()
+                    browser.close()
+                    return False
+
+            except Exception as e:
+                LOGGER.error(f"Download failed: {e}")
+                context.close()
+                browser.close()
+                return False
+
+    except Exception as e:
+        LOGGER.error(f"Failed to download PDF: {e}")
+        return False
 
 def fetch_ifg_pdfs(year, month, timeout=30):
-    """Fetch IFG PDFs using Playwright with anti-bot bypass (headless=False + stealth)."""
+    """Fetch IFG PDFs using Playwright with minimal visible browser window."""
     if sync_playwright is None:
         raise RuntimeError("Playwright not installed; pip install playwright && playwright install chromium")
 
     with sync_playwright() as p:
-        # IFG blocks headless browsers, use headless=False
-        browser = p.chromium.launch(headless=False)
+        # IFG WAF blocks headless browsers, use headless=False but minimize window
+        # This allows the browser to pass WAF checks while appearing minimal
+        browser = p.chromium.launch(headless=False, args=[
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-popup-blocking",
+        ])
         page = browser.new_page(
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 720}
         )
 
-        # Add stealth to hide playwright
-        page.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {get: () => false});
-            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
-        """)
-
         try:
-            page.goto(SOURCE_URL, wait_until="networkidle", timeout=timeout * 1000)
+            LOGGER.info(f"Fetching IFG page with Playwright browser...")
+            # Use shorter timeout and domcontentloaded to avoid networkidle hangs
+            page.goto(SOURCE_URL, wait_until="domcontentloaded", timeout=20 * 1000)
+            # Wait for any dynamic content to load
+            page.wait_for_timeout(3000)
             content = page.content()
+
+            LOGGER.debug(f"Received {len(content)} bytes from IFG page")
 
             # Extract all PDF URLs from page HTML
             pdf_urls = re.findall(r'https://[^\s"<>]+\.pdf', content)
+            LOGGER.info(f"Found {len(pdf_urls)} total PDF URLs on page")
 
-            # Filter by year and month - be strict to avoid adjacent months
+            # Filter by year and month
             month_keywords = [month_name[month].lower(), str(month).zfill(2), f"0{month}"]
             matching_pdfs = []
 
@@ -102,17 +153,18 @@ def fetch_ifg_pdfs(year, month, timeout=30):
                     continue
 
                 # Additional check: ensure it's not an adjacent month
-                # Exclude previous month (month-1)
                 prev_month = (month - 2) % 12 + 1 if month > 1 else 12
                 prev_month_kw = [month_name[prev_month].lower(), str(prev_month).zfill(2)]
                 if any(kw in url_lower for kw in prev_month_kw):
                     continue
 
                 matching_pdfs.append(url)
+                LOGGER.debug(f"Matched PDF: {url}")
 
-            LOGGER.info(f"Found {len(matching_pdfs)} PDFs for {year}-{month:02d} (strict filtering to avoid adjacent months)")
+            LOGGER.info(f"Found {len(matching_pdfs)} PDFs for {year}-{month:02d}")
 
-            return content, SOURCE_URL, matching_pdfs if matching_pdfs else pdf_urls
+            # Return PDFs
+            return content, SOURCE_URL, (matching_pdfs if matching_pdfs else pdf_urls)
         finally:
             browser.close()
 
@@ -146,8 +198,8 @@ def main():
     LOGGER.info(f"Fetching from {SOURCE_URL}")
 
     try:
-        # IFG requires special handling: anti-bot bypass with headless=False
-        LOGGER.info("Using Playwright with anti-bot bypass (headless=False)")
+        # IFG requires special handling: use headless=False to bypass WAF
+        LOGGER.info("Fetching IFG reports using Playwright (requires visible browser due to WAF)")
         html, discovered_url, pdf_urls = fetch_ifg_pdfs(args.year, args.month, args.timeout)
 
         # Use the first matching PDF URL as candidate
@@ -213,7 +265,7 @@ def main():
         }])
         return 0
     
-    # For IFG, download via Playwright to bypass 403
+    # Download the PDF
     try:
         output_pdf.parent.mkdir(parents=True, exist_ok=True)
         success = download_pdf_via_playwright(selected_candidate.url, str(output_pdf), args.timeout)
