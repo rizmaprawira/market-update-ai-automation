@@ -35,8 +35,10 @@ def discover_indolife_pdf(year: int, month: int, session, timeout: int = 30) -> 
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page()
-        page.goto(SOURCE_URL, timeout=timeout * 1000, wait_until="domcontentloaded")
-        page.wait_for_timeout(1500)
+        # Use longer timeout for page load - Indolife site is slow
+        page_timeout = max(timeout * 1000, 60000)
+        page.goto(SOURCE_URL, timeout=page_timeout, wait_until="domcontentloaded")
+        page.wait_for_timeout(2000)
 
         html = page.content()
         browser.close()

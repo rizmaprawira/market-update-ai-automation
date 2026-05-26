@@ -2,17 +2,11 @@
 import argparse
 import logging
 import sys
-import time
-import re
 from pathlib import Path
-from calendar import month_name
 from bs4 import BeautifulSoup
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from _downloader_base import (
-    build_session, extract_pdf_links, download_pdf, write_manifest, write_debug_html,
-    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback, current_timestamp
-)
+from _downloader_base import write_manifest, current_timestamp
 
 try:
     from playwright.sync_api import sync_playwright
@@ -25,63 +19,88 @@ COMPANY_ID = "pt_avrist_assurance"
 COMPANY_NAME = "PT Avrist Assurance"
 CATEGORY = "asuransi_jiwa"
 
-def extract_avrist_monthly_pdfs(html, year, month):
-    """Extract only monthly (not annual) PDF links from Avrist page."""
-    soup = BeautifulSoup(html, 'html.parser')
-    monthly_pdfs = []
-
-    for link in soup.find_all('a'):
-        href = link.get('href', '').strip()
-        if not href:
-            continue
-
-        link_text = link.get_text(strip=True).lower()
-        parent_text = link.parent.get_text(strip=True).lower() if link.parent else ""
-        full_text = (link_text + " " + parent_text).lower()
-
-        # Must be PDF
-        if not (href.endswith('.pdf') or '.pdf' in href):
-            continue
-
-        # Exclude sustainability/sustainability reports
-        if 'keberlanjutan' in full_text or 'sustainability' in full_text:
-            continue
-
-        # Exclude annual reports (tahunan)
-        if 'tahunan' in full_text or 'annual' in full_text:
-            continue
-
-        # Look for monthly indicators OR recent year match
-        has_monthly = 'bulanan' in full_text or 'monthly' in full_text
-        has_year = str(year) in full_text or str(year) in href
-
-        # Include if it has "bulanan" label, or if it has the target year and no "annual" keyword
-        if has_monthly or has_year:
-            monthly_pdfs.append(href)
-            LOGGER.debug(f"Accepted: {link_text[:60]} -> {href[:80]}")
-
-    return monthly_pdfs
-
-def fetch_avrist_pdfs_fast(url, timeout=30):
-    """Fetch Avrist PDFs with careful timing for dynamic Next.js content."""
+def download_avrist_report(url, year, month, output_path, timeout=60):
+    """Download Avrist konvensional report by setting dropdowns and clicking Unduh button."""
     if sync_playwright is None:
         raise RuntimeError("Playwright not installed")
+
+    indonesian_months = {
+        1: 'januari', 2: 'februari', 3: 'maret', 4: 'april', 5: 'mei', 6: 'juni',
+        7: 'juli', 8: 'agustus', 9: 'september', 10: 'oktober', 11: 'november', 12: 'desember'
+    }
+    target_month = indonesian_months.get(month, '').lower()
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
 
         try:
+            # Load the page
+            LOGGER.info(f"Loading {url}")
             page.goto(url, wait_until="domcontentloaded", timeout=int(timeout * 1000 * 0.6))
-            page.wait_for_timeout(int(timeout * 1000 * 0.4))
+            page.wait_for_timeout(3000)
+
+            # Click on "Laporan Keuangan" sidebar item
+            LOGGER.info("Clicking Laporan Keuangan sidebar...")
+            sidebar_items = page.query_selector_all('div.cursor-pointer')
+            for item in sidebar_items:
+                if item.text_content().strip() == 'Laporan Keuangan':
+                    item.click()
+                    page.wait_for_timeout(4000)
+                    break
+
+            # Set year and month dropdowns
+            LOGGER.info(f"Setting year={year}, month={month}")
+            page.evaluate(f"""
+            () => {{
+                const selects = document.querySelectorAll('select');
+                if (selects[0]) selects[0].value = '{year}';
+                if (selects[1]) selects[1].value = '{month:02d}';
+            }}
+            """)
+            page.wait_for_timeout(3000)
+
+            # Find and click the Unduh button for konvensional report
             html = page.content()
-            return html, page.url
-        except Exception:
-            page.wait_for_timeout(2000)
-            html = page.content()
-            return html, page.url
+            soup = BeautifulSoup(html, 'html.parser')
+
+            # Check if the konvensional report is present
+            found = False
+            for elem in soup.find_all(['p', 'div']):
+                text = elem.get_text(strip=True).lower()
+                if str(year) in text and target_month in text and 'konvensional' in text:
+                    LOGGER.info(f"Found report: {text[:60]}")
+                    found = True
+                    break
+
+            if not found:
+                LOGGER.error(f"Report not found for {year}-{month:02d}")
+                return False
+
+            # Find all Unduh buttons and use the first one
+            all_buttons = page.query_selector_all('button')
+            for btn in all_buttons:
+                if btn.text_content().lower().strip() == 'unduh':
+                    LOGGER.info("Clicking Unduh button...")
+                    with page.expect_download() as download_info:
+                        btn.click()
+
+                    download = download_info.value
+                    download.save_as(output_path)
+
+                    file_size = Path(output_path).stat().st_size
+                    LOGGER.info(f"Downloaded {file_size} bytes to {output_path}")
+                    return True
+
+            LOGGER.error("No Unduh button found")
+            return False
+
+        except Exception as e:
+            LOGGER.error(f"Download failed: {e}")
+            return False
         finally:
             browser.close()
+
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
@@ -91,132 +110,70 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Discovery only, no download")
     parser.add_argument("--discover-only", action="store_true", help="Stop after discovery, return 0")
     parser.add_argument("--force", action="store_true", help="Overwrite existing PDF")
-    parser.add_argument("--use-browser", action="store_true", help="Use Playwright browser rendering")
     parser.add_argument("--debug-html", action="store_true", help="Save debug HTML on failure")
-    parser.add_argument("--timeout", type=int, default=30, help="HTTP timeout in seconds")
+    parser.add_argument("--timeout", type=int, default=60, help="HTTP timeout in seconds")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 
-    if not args.year or not args.month or not 1 <= args.month <= 12:
-        LOGGER.error("Year and month are required; month must be 1-12")
+    if not args.year or not 1 <= args.month <= 12:
+        LOGGER.error("Year and month (1-12) are required")
         return 1
-    
-    session = build_session()
+
     period = f"{args.year:04d}-{args.month:02d}"
     output_dir = args.output_root / period / CATEGORY / COMPANY_ID
     output_pdf = output_dir / f"{COMPANY_ID}_{args.year:04d}_{args.month:02d}.pdf"
-    debug_dir = output_dir / "_debug_html"
-    
-    LOGGER.info(f"Fetching from {SOURCE_URL}")
 
-    try:
-        LOGGER.info("Using fast browser rendering (domcontentloaded wait)")
-        html, discovered_url = fetch_avrist_pdfs_fast(SOURCE_URL, args.timeout)
-    except Exception as e:
-        reason = f"failed to fetch: {e}"
-        LOGGER.error(reason)
-        if args.debug_html:
-            write_debug_html(debug_dir, "", reason)
-        write_manifest(output_dir, [{
-            "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
-            "source_page_url": SOURCE_URL, "discovered_page_url": SOURCE_URL,
-            "pdf_url": "", "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "error", "reason": reason,
-            "timestamp": current_timestamp()
-        }])
-        return 1
-
-    # Extract monthly (not annual) PDFs
-    pdf_urls = extract_avrist_monthly_pdfs(html, args.year, args.month)
-
-    if not pdf_urls:
-        # Fallback to generic extraction if custom filter finds nothing
-        LOGGER.info("No monthly PDFs found with strict filter, trying generic extraction")
-        candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
-    else:
-        # Wrap URLs in candidate objects for compatibility
-        class PDFCandidate:
-            def __init__(self, url, text):
-                self.url = url
-                self.text = text
-        candidates = [PDFCandidate(url=pdf_urls[0], text=f"Monthly PDF")]
-    
-    if not candidates:
-        reason = "no PDF candidates found"
-        LOGGER.warning(reason)
-        if args.debug_html:
-            write_debug_html(debug_dir, html, reason)
-        write_manifest(output_dir, [{
-            "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
-            "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-            "pdf_url": "", "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "not_found", "reason": reason,
-            "timestamp": current_timestamp()
-        }])
-        return 1
-    
-    selected_candidate = candidates[0]
-    LOGGER.info(f"Selected: {selected_candidate.text[:60]}")
-    
-    if args.discover_only:
-        LOGGER.info("Discover-only mode: stopping after discovery")
-        write_manifest(output_dir, [{
-            "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
-            "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-            "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "discover_only", "reason": "discover-only mode",
-            "timestamp": current_timestamp()
-        }])
-        return 0
-
-    if args.dry_run:
-        LOGGER.info(f"Dry-run: would download from {selected_candidate.url}")
-        write_manifest(output_dir, [{
-            "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
-            "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-            "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "dry_run", "reason": "dry-run mode",
-            "timestamp": current_timestamp()
-        }])
-        return 0
-    
     if output_pdf.exists() and not args.force:
         LOGGER.info(f"PDF already exists at {output_pdf}")
         write_manifest(output_dir, [{
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
-            "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-            "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+            "source_page_url": SOURCE_URL, "discovered_page_url": SOURCE_URL,
+            "pdf_url": "", "target_year": args.year, "target_month": args.month,
             "output_path": str(output_pdf), "status": "skipped_existing", "reason": "file exists",
             "timestamp": current_timestamp()
         }])
         return 0
-    
-    http_status, file_size = download_pdf(
-        session, selected_candidate.url, output_pdf, timeout=args.timeout, force=args.force
-    )
 
-    status = "downloaded" if http_status is not None else "skipped_existing"
-    reason = (
-        f"HTTP {http_status} ({file_size} bytes)"
-        if http_status is not None
-        else f"existing valid PDF kept ({file_size} bytes)"
-    )
+    if args.discover_only or args.dry_run:
+        LOGGER.info("Discover/dry-run mode: skipping download")
+        write_manifest(output_dir, [{
+            "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
+            "source_page_url": SOURCE_URL, "discovered_page_url": SOURCE_URL,
+            "pdf_url": "", "target_year": args.year, "target_month": args.month,
+            "output_path": str(output_pdf), "status": "dry_run" if args.dry_run else "discover_only",
+            "reason": "dry-run mode" if args.dry_run else "discover-only mode",
+            "timestamp": current_timestamp()
+        }])
+        return 0
+
+    # Create output directory
+    output_pdf.parent.mkdir(parents=True, exist_ok=True)
+
+    # Download the report
+    success = download_avrist_report(SOURCE_URL, args.year, args.month, str(output_pdf), args.timeout)
+
+    if success:
+        file_size = output_pdf.stat().st_size
+        status = "downloaded"
+        reason = f"Downloaded ({file_size} bytes)"
+        LOGGER.info(f"Successfully downloaded to {output_pdf}")
+        returncode = 0
+    else:
+        status = "error"
+        reason = "Failed to download"
+        returncode = 1
 
     write_manifest(output_dir, [{
         "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
-        "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-        "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+        "source_page_url": SOURCE_URL, "discovered_page_url": SOURCE_URL,
+        "pdf_url": "", "target_year": args.year, "target_month": args.month,
         "output_path": str(output_pdf), "status": status, "reason": reason,
         "timestamp": current_timestamp()
     }])
 
-    if http_status is not None:
-        LOGGER.info(f"Successfully downloaded to {output_pdf}")
-    else:
-        LOGGER.info(f"Existing PDF kept at {output_pdf}")
+    return returncode
 
-    return 0
 
 if __name__ == "__main__":
     sys.exit(main())

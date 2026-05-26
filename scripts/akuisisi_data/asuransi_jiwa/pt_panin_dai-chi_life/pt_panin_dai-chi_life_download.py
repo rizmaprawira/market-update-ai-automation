@@ -3,6 +3,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
@@ -13,11 +14,45 @@ from _downloader_base import (
     normalize_text, matches_target_period, score_candidate, MONTH_LABELS, PDFCandidate
 )
 
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:
+    sync_playwright = None
+
 LOGGER = logging.getLogger("download_pt_panin_dai-chi_life")
-SOURCE_URL = "https://www.panindai-ichilife.co.id/id/laporan-keuangan"
+SOURCE_URL = "http://www.panindai-ichilife.co.id/id/laporan-keuangan"
 COMPANY_ID = "pt_panin_dai-chi_life"
 COMPANY_NAME = "PT Panin Dai-Chi Life"
 CATEGORY = "asuransi_jiwa"
+
+def fetch_html_with_stealth(url, timeout=30):
+    """Fetch HTML using headless browser with no-sandbox."""
+    if sync_playwright is None:
+        raise RuntimeError("Playwright not installed")
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+            ]
+        )
+        page = browser.new_page(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        )
+        try:
+            page.goto(url, wait_until="networkidle", timeout=timeout * 1000)
+            page.wait_for_timeout(2000)
+            html = page.content()
+            final_url = page.url
+            browser.close()
+            return html, final_url
+        except Exception as e:
+            browser.close()
+            raise RuntimeError(f"browser fetch failed: {e}") from e
 
 def extract_pdf_links(html, base_url, year, month):
     import re
@@ -30,14 +65,18 @@ def extract_pdf_links(html, base_url, year, month):
             continue
 
         text = link.get_text(strip=True)
-        if text.lower() != "download pdf":
+        if "download" not in text.lower():
             continue
 
         parent_text = ""
+        ancestor_text = ""
         if link.parent:
             parent_text = link.parent.get_text(" ", strip=True)
+            # Also check grandparent and great-grandparent for card container
+            if link.parent.parent:
+                ancestor_text = link.parent.parent.get_text(" ", strip=True)
 
-        blob_text = " ".join(part for part in [text, parent_text, href] if part)
+        blob_text = " ".join(part for part in [text, parent_text, ancestor_text, href] if part)
         blob = normalize_text(blob_text)
         url = urljoin(base_url, href)
 
@@ -46,6 +85,10 @@ def extract_pdf_links(html, base_url, year, month):
 
         score = score_candidate(blob_text, year, month)
         score += 50
+        # Boost score if the immediate parent/card contains ONLY the target month
+        # (not multiple months in the same card)
+        if parent_text and MONTH_LABELS[month].lower() in normalize_text(parent_text):
+            score += 100
         candidates.append(PDFCandidate(url=url, text=text, score=score, discovered_url=base_url))
 
     return sorted(candidates, key=lambda x: x.score, reverse=True)
@@ -75,7 +118,8 @@ def main():
         LOGGER.error("Month must be 1-12")
         return 1
 
-    session = build_session()
+    session = requests.Session()
+    session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
     period = f"{args.year:04d}-{args.month:02d}"
     output_dir = args.output_root / period / CATEGORY / COMPANY_ID
     output_pdf = output_dir / f"{COMPANY_ID}_{args.year:04d}_{args.month:02d}.pdf"
@@ -84,13 +128,13 @@ def main():
     LOGGER.info(f"Fetching from {SOURCE_URL}")
 
     try:
-        if args.use_browser:
-            LOGGER.info("Using Playwright browser rendering")
-            html, discovered_url = fetch_html_browser_domready(SOURCE_URL, args.timeout, extra_wait_ms=3000)
-        else:
-            html, discovered_url, used_browser = fetch_html_with_smart_fallback(
-                session, SOURCE_URL, args.year, args.month, args.timeout
-            )
+        try:
+            html, discovered_url = session.get(SOURCE_URL, timeout=args.timeout).text, SOURCE_URL
+            LOGGER.info(f"Static fetch succeeded ({len(html)} bytes)")
+        except Exception as e:
+            LOGGER.info(f"Static fetch failed ({e}), falling back to browser")
+            html, discovered_url = fetch_html_with_stealth(SOURCE_URL, args.timeout)
+            LOGGER.info(f"Browser fetch got {len(html)} bytes")
     except Exception as e:
         reason = f"failed to fetch: {e}"
         LOGGER.error(reason)
@@ -106,6 +150,7 @@ def main():
         return 1
 
     candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
+    LOGGER.info(f"Extraction found {len(candidates)} candidates")
 
     if not candidates:
         reason = "no PDF candidates found"

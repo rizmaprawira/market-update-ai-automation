@@ -27,7 +27,6 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Discovery only, no download")
     parser.add_argument("--discover-only", action="store_true", help="Stop after discovery, return 0")
     parser.add_argument("--force", action="store_true", help="Overwrite existing PDF")
-    parser.add_argument("--use-browser", action="store_true", help="Use Playwright browser rendering")
     parser.add_argument("--debug-html", action="store_true", help="Save debug HTML on failure")
     parser.add_argument("--timeout", type=int, default=30, help="HTTP timeout in seconds")
     args = parser.parse_args()
@@ -47,13 +46,9 @@ def main():
     LOGGER.info(f"Fetching from {SOURCE_URL}")
     
     try:
-        if args.use_browser:
-            LOGGER.info("Using Playwright browser rendering")
-            html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
-        else:
-            html, discovered_url, used_browser = fetch_html_with_smart_fallback(
-                session, SOURCE_URL, args.year, args.month, args.timeout
-            )
+        html, discovered_url, used_browser = fetch_html_with_smart_fallback(
+            session, SOURCE_URL, args.year, args.month, args.timeout
+        )
     except Exception as e:
         reason = f"failed to fetch: {e}"
         LOGGER.error(reason)
@@ -120,10 +115,18 @@ def main():
         }])
         return 0
     
-    http_status, file_size = download_pdf(
-        session, selected_candidate.url, output_pdf, timeout=args.timeout, force=args.force
-    )
-    
+    try:
+        http_status, file_size = download_pdf(
+            session, selected_candidate.url, output_pdf, timeout=args.timeout, force=args.force
+        )
+        success = True
+        reason = f"downloaded {file_size} bytes"
+        LOGGER.info(f"Successfully downloaded to {output_pdf}")
+    except Exception as e:
+        success = False
+        reason = str(e)
+        LOGGER.error(f"Failed to download: {reason}")
+
     write_manifest(output_dir, [{
         "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
         "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
@@ -131,12 +134,7 @@ def main():
         "output_path": str(output_pdf), "status": "downloaded" if success else "failed",
         "reason": reason, "timestamp": current_timestamp()
     }])
-    
-    if success:
-        LOGGER.info(f"Successfully downloaded to {output_pdf}")
-    else:
-        LOGGER.error(f"Failed to download: {reason}")
-    
+
     return 0 if success else 1
 
 if __name__ == "__main__":
