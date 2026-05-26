@@ -15,6 +15,7 @@ COLUMNS = [
     "aset",
     "ekuitas",
     "premi_penutupan_tidak_langsung",
+    "komisi_reasuransi_diterima",
     "premi_bruto",
     "pendapatan_premi",
     "hasil_underwriting",
@@ -69,6 +70,11 @@ def main():
         r"Indirect Premiums",
         r"Premi.*Tidak.*Langsung"
     ])
+    komisi_rea_2026, komisi_rea_2025 = extract_two_numbers(text, [
+        r"Komisi Reasuransi Diterima",
+        r"Reinsurance Commission Received",
+        r"Komisi.*Reasuransi.*Diterima"
+    ])
     premi_bruto_2026, premi_bruto_2025 = extract_two_numbers(text, [
         r"Jumlah Premi Bruto",
         r"Total Gross Premiums",
@@ -111,6 +117,7 @@ def main():
             "aset": aset_2026,
             "ekuitas": ekuitas_2026,
             "premi_penutupan_tidak_langsung": premi_tl_2026,
+            "komisi_reasuransi_diterima": komisi_rea_2026,
             "premi_bruto": premi_bruto_2026,
             "pendapatan_premi": pend_premi_2026,
             "hasil_underwriting": hasil_uw_2026,
@@ -125,6 +132,7 @@ def main():
             "aset": aset_prev,
             "ekuitas": ekuitas_prev,
             "premi_penutupan_tidak_langsung": premi_tl_2025,
+            "komisi_reasuransi_diterima": komisi_rea_2025,
             "premi_bruto": premi_bruto_2025,
             "pendapatan_premi": pend_premi_2025,
             "hasil_underwriting": hasil_uw_2025,
