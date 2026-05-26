@@ -2,74 +2,56 @@
 import argparse
 import logging
 import sys
-import time
 from pathlib import Path
-from collections import namedtuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 from _downloader_base import (
     build_session, extract_pdf_links, download_pdf, write_manifest, write_debug_html,
-    fetch_html_static, fetch_html_browser, fetch_html_with_smart_fallback,
-    discover_download_candidate, current_timestamp, MONTH_LABELS
+    fetch_html_with_smart_fallback, discover_download_candidate, current_timestamp,
+    MONTH_LABELS, PDFCandidate
 )
 
-Candidate = namedtuple("Candidate", ["url", "text"])
-
 LOGGER = logging.getLogger("download_pt_asuransi_digital_bersama_tbk")
-SOURCE_URL = "https://adbinsure.com/kinerja-keuangan"
-STORAGE_BASE = "https://adbinsure.com/storage/files/"
+SOURCE_URL = "https://adbinsure.com/laporan-keuangan"
 COMPANY_ID = "pt_asuransi_digital_bersama_tbk"
 COMPANY_NAME = "PT Asuransi Digital Bersama Tbk."
 CATEGORY = "asuransi_umum"
 
 
-def discover_storage_candidates(session, year, month, timeout=30):
-    """Try to find PDF in ADB Insure storage folder with various naming patterns."""
-    candidates = []
+def find_adb_report_link(html, base_url, year, month):
+    """Extract ADB financial report link with priority for exact month match in link text.
 
-    # Pattern 1: laporan_keuangan_pt_asuransi_digital_bersama_publikasi_web_[MONTHABBR]_[YY].pdf
-    # e.g., laporan_keuangan_pt_asuransi_digital_bersama_publikasi_web_mar_26.pdf
-    month_abbr = MONTH_LABELS[month].lower()[:3]
-    yy = str(year)[2:]
+    The page has report cards with text like "Laporan Keuangan April 2026" that directly
+    link to PDFs. This function finds the exact match for the target year/month.
+    """
+    soup = BeautifulSoup(html, 'html.parser')
+    month_label = MONTH_LABELS[month].lower()
+    target_year_str = str(year)
 
-    pattern1 = f"laporan_keuangan_pt_asuransi_digital_bersama_publikasi_web_{month_abbr}_{yy}.pdf"
-    url1 = STORAGE_BASE + pattern1
-    try:
-        r = session.head(url1, timeout=timeout, allow_redirects=True)
-        if r.status_code == 200:
-            candidates.append(Candidate(url=url1, text=f"Storage pattern 1: {pattern1}"))
-            LOGGER.info(f"✓ Found via pattern 1: {pattern1}")
-    except Exception as e:
-        LOGGER.debug(f"Pattern 1 failed: {e}")
+    # Find links with exact month/year match in the text
+    best_candidate = None
+    for link in soup.find_all('a', href=True):
+        href = link.get('href', '').strip()
+        if not href or not href.lower().endswith('.pdf'):
+            continue
 
-    # Pattern 2: LAPKEU_BULANAN_[MONTHABBR]_[YY].pdf
-    # e.g., LAPKEU_BULANAN_MAR_26.pdf
-    month_abbr_upper = MONTH_LABELS[month].upper()[:3]
-    pattern2 = f"LAPKEU_BULANAN_{month_abbr_upper}_{yy}.pdf"
-    url2 = STORAGE_BASE + pattern2
-    try:
-        r = session.head(url2, timeout=timeout, allow_redirects=True)
-        if r.status_code == 200:
-            candidates.append(Candidate(url=url2, text=f"Storage pattern 2: {pattern2}"))
-            LOGGER.info(f"✓ Found via pattern 2: {pattern2}")
-    except Exception as e:
-        LOGGER.debug(f"Pattern 2 failed: {e}")
+        text = link.get_text(strip=True).lower()
+        # Check if link text contains both the month name and year
+        if month_label in text and target_year_str in text:
+            url = urljoin(base_url, href)
+            # Exact month/year match in text deserves high score
+            score = 100
+            if 'laporan' in text and 'keuangan' in text:
+                score += 20
+            candidate = PDFCandidate(url=url, text=link.get_text(strip=True),
+                                   score=score, discovered_url=base_url)
+            if not best_candidate or candidate.score > best_candidate.score:
+                best_candidate = candidate
 
-    # Pattern 3: lapkeu [MM][YY].pdf (with space or %20)
-    # e.g., lapkeu 0326.pdf or lapkeu%200326.pdf
-    mm = f"{month:02d}"
-    pattern3 = f"lapkeu%20{mm}{yy}.pdf"
-    url3 = STORAGE_BASE + pattern3
-    try:
-        r = session.head(url3, timeout=timeout, allow_redirects=True)
-        if r.status_code == 200:
-            candidates.append(Candidate(url=url3, text=f"Storage pattern 3: {pattern3}"))
-            LOGGER.info(f"✓ Found via pattern 3: {pattern3}")
-    except Exception as e:
-        LOGGER.debug(f"Pattern 3 failed: {e}")
-
-    return candidates
+    return [best_candidate] if best_candidate else []
 
 def main():
     parser = argparse.ArgumentParser(description=f"Download {COMPANY_NAME} financial reports")
@@ -120,15 +102,12 @@ def main():
         }])
         return 1
     
-    candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
+    # Try custom ADB report extraction first (exact month match in link text)
+    candidates = find_adb_report_link(html, discovered_url, args.year, args.month)
 
-    # Try ADB Insure storage folder with pattern matching
+    # Fall back to generic PDF link extraction
     if not candidates:
-        LOGGER.info("Trying ADB Insure storage folder patterns...")
-        storage_candidates = discover_storage_candidates(session, args.year, args.month, args.timeout)
-        if storage_candidates:
-            candidates = storage_candidates
-            LOGGER.info(f"Found {len(candidates)} candidate(s) in storage folder")
+        candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
 
     # Try generic multi-hop fallback
     if not candidates:
