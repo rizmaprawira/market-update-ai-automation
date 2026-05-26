@@ -25,7 +25,7 @@ except ImportError:
     cloudscraper = None
 
 LOGGER = logging.getLogger("download_pt_asuransi_jiwa_manulife_indonesia")
-SOURCE_URL = "https://www.manulife.co.id/id/tentang-kami/laporan-keuangan.html"
+SOURCE_URL = "http://www.manulife.co.id/id/tentang-kami/laporan-keuangan.html"
 COMPANY_ID = "pt_asuransi_jiwa_manulife_indonesia"
 COMPANY_NAME = "PT Asuransi Jiwa Manulife Indonesia"
 CATEGORY = "asuransi_jiwa"
@@ -154,74 +154,54 @@ def download_pdf_via_cloudscraper(pdf_url, output_path, timeout=30):
         LOGGER.error(f"Failed to download via cloudscraper: {e}")
         return False
 
-def download_pdf_via_playwright(pdf_url, output_path, timeout=30):
-    """Download PDF using Playwright to bypass 403 blocking."""
+def download_pdf_via_firefox(pdf_url, output_path, timeout=30):
+    """Download PDF using Firefox to bypass WAF blocking."""
     if sync_playwright is None:
         raise RuntimeError("Playwright not installed")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        LOGGER.info("Using Firefox to download PDF...")
+        browser = p.firefox.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage"]
         )
-        page = context.new_page()
-        page.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {get: () => false});
-        """)
+        page = browser.new_page(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0"
+        )
+        page.set_default_timeout(timeout * 1000)
 
         try:
-            # Set default timeout for all operations
-            page.set_default_timeout(timeout * 1000)
-
-            # Load source page to establish session and cookies
+            # Load source page to establish session
             LOGGER.info("Loading source page to establish session...")
-            page.goto(SOURCE_URL, timeout=15000, wait_until="networkidle")
+            page.goto(SOURCE_URL, wait_until="networkidle", timeout=15000)
             page.wait_for_timeout(2000)
 
-            # Use JavaScript fetch API within page context to download PDF with all cookies/headers
-            LOGGER.info(f"Downloading PDF via fetch from within page context: {pdf_url}")
-            pdf_data = page.evaluate(f"""
-                async () => {{
-                    const response = await fetch('{pdf_url}', {{
-                        method: 'GET',
-                        credentials: 'include',
-                        headers: {{
-                            'Referer': '{SOURCE_URL}'
-                        }}
-                    }});
-                    if (!response.ok) {{
-                        throw new Error(`HTTP error! status: ${{response.status}}`);
-                    }}
-                    const blob = await response.blob();
-                    const reader = new FileReader();
-                    return new Promise((resolve) => {{
-                        reader.onloadend = () => {{
-                            resolve(Array.from(new Uint8Array(reader.result)));
-                        }};
-                        reader.readAsArrayBuffer(blob);
-                    }});
-                }}
-            """)
+            # Download PDF via fetch from within Firefox context
+            LOGGER.info(f"Downloading PDF via Firefox fetch: {pdf_url}")
 
-            # Convert list of bytes to bytes object
-            content = bytes(pdf_data)
+            # Create a listener to intercept and download the response
+            with page.expect_download() as download_info:
+                page.evaluate(f"""
+                    window.location.href = '{pdf_url}';
+                """)
 
-            # Verify we got a PDF, not an error page
-            if not content.startswith(b'%PDF'):
-                LOGGER.error(f"Downloaded content is not a valid PDF (got {len(content)} bytes, first bytes: {content[:20]})")
+            download = download_info.value
+            download.save_as(output_path)
+
+            # Verify file
+            import os
+            file_size = os.path.getsize(output_path)
+
+            if file_size < 100:
+                LOGGER.error(f"Downloaded file too small ({file_size} bytes), likely an error page")
                 return False
 
-            # Write PDF to file
-            with open(output_path, 'wb') as f:
-                f.write(content)
-
-            LOGGER.info(f"Downloaded valid PDF ({len(content)} bytes) to {output_path}")
+            LOGGER.info(f"Downloaded PDF ({file_size} bytes) to {output_path}")
             return True
         except Exception as e:
-            LOGGER.error(f"Failed to download via Playwright: {e}")
+            LOGGER.error(f"Failed to download via Firefox: {e}")
             return False
         finally:
-            context.close()
             browser.close()
 
 def find_manulife_pdf_url(year, month):
@@ -235,73 +215,103 @@ def find_manulife_pdf_url(year, month):
     target_month = month_names_id.get(month)
     target_year = str(year)
 
-    # Try cloudscraper first
-    if cloudscraper is not None:
-        try:
-            LOGGER.info(f"Attempting to access Manulife website for {target_month} {target_year} via cloudscraper...")
-            scraper = cloudscraper.create_scraper()
-            response = scraper.get(SOURCE_URL, timeout=30)
-
-            if response.status_code >= 400:
-                LOGGER.warning(f"Website returned status {response.status_code}, trying Playwright...")
-            else:
-                LOGGER.info(f"Successfully accessed website via cloudscraper")
-                # Parse HTML to find PDF links
-                from bs4 import BeautifulSoup
-                soup = BeautifulSoup(response.text, 'html.parser')
-
-                pdf_links = []
-                for link in soup.find_all('a'):
-                    href = link.get('href', '')
-                    text = link.get_text(strip=True)
-                    if href.endswith('.pdf') or 'laporan' in text.lower():
-                        pdf_links.append({'text': text, 'href': href})
-
-                # Look for matching link
-                for link in pdf_links:
-                    link_text_lower = link['text'].lower()
-                    if target_month.lower() in link_text_lower and target_year in link_text_lower:
-                        LOGGER.info(f"Found matching PDF link: {link['text']}")
-                        return link['href']
-
-                if not pdf_links:
-                    LOGGER.warning(f"No PDF links found for {target_month} {target_year}")
-                else:
-                    LOGGER.warning(f"No matching PDF link found for {target_month} {target_year}")
-                    LOGGER.info(f"Available links: {pdf_links[:3]}")
-        except Exception as e:
-            LOGGER.warning(f"cloudscraper failed: {e}, trying Playwright...")
-
-    # Fall back to Playwright
     if sync_playwright is None:
-        LOGGER.error("Playwright not available and cloudscraper failed")
+        LOGGER.error("Playwright not available")
         return None
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            LOGGER.info("Using Firefox browser to bypass WAF...")
+            browser = p.firefox.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-dev-shm-usage"]
             )
-            page = context.new_page()
+            page = browser.new_page(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0"
+            )
             page.set_default_timeout(30000)
 
             try:
-                LOGGER.info(f"Attempting via Playwright...")
-                response = page.goto(SOURCE_URL, wait_until="domcontentloaded")
-
-                if response.status == 403:
-                    LOGGER.error("Manulife website returns 403 Forbidden")
-                    return None
-
+                LOGGER.info(f"Attempting to access Manulife website for {target_month} {target_year} via Playwright...")
+                page.goto(SOURCE_URL, wait_until="networkidle", timeout=30000)
                 page.wait_for_timeout(3000)
+
+                # Find and click the "Laporan Keuangan Bulanan" tab
+                LOGGER.info("Clicking 'Laporan Keuangan Bulanan' tab...")
+                tab_selector = "button:has-text('Laporan Keuangan Bulanan')"
+                try:
+                    page.click(tab_selector, timeout=5000)
+                    page.wait_for_timeout(1000)
+                except:
+                    LOGGER.warning("Could not click tab via has-text, trying alternative selector...")
+                    # Alternative: click any button that contains "Bulanan"
+                    buttons = page.locator("button")
+                    for i in range(buttons.count()):
+                        btn_text = buttons.nth(i).text_content()
+                        if "Bulanan" in btn_text:
+                            buttons.nth(i).click()
+                            page.wait_for_timeout(1000)
+                            break
+
+                # Click to expand "Laporan Keuangan Bulanan - Manulife Indonesia"
+                LOGGER.info("Expanding 'Laporan Keuangan Bulanan - Manulife Indonesia' section...")
+                expand_selector = "button:has-text('Laporan Keuangan Bulanan - Manulife Indonesia')"
+                try:
+                    page.click(expand_selector, timeout=5000)
+                    page.wait_for_timeout(1500)
+                except:
+                    LOGGER.warning("Could not expand section via has-text, trying alternative...")
+                    buttons = page.locator("button")
+                    for i in range(buttons.count()):
+                        btn_text = buttons.nth(i).text_content()
+                        if "Laporan Keuangan Bulanan - Manulife Indonesia" in btn_text and "Unit Syariah" not in btn_text:
+                            buttons.nth(i).click()
+                            page.wait_for_timeout(1500)
+                            break
+
+                # Wait for PDF links to appear and get all links
+                page.wait_for_timeout(2000)
+                page_content = page.content()
+                soup = BeautifulSoup(page_content, 'html.parser')
+
+                # Find all download links with month/year info
+                pdf_links = []
+                for link in soup.find_all('a'):
+                    href = link.get('href', '')
+                    text = link.get_text(strip=True)
+                    if href.endswith('.pdf'):
+                        pdf_links.append({'text': text, 'href': href})
+
+                LOGGER.info(f"Found {len(pdf_links)} PDF links after expanding")
+
+                # Look for matching link
+                for link in pdf_links:
+                    link_text_lower = link['text'].lower()
+                    # Check if both month and year are in the text
+                    if target_month.lower() in link_text_lower and target_year in link_text_lower:
+                        LOGGER.info(f"Found matching PDF link: {link['text']}")
+                        # Convert relative URL to absolute
+                        pdf_url = link['href']
+                        if pdf_url.startswith('/'):
+                            pdf_url = f"http://www.manulife.co.id{pdf_url}"
+                        return pdf_url
+
+                # If no exact match, log what's available
+                if pdf_links:
+                    LOGGER.warning(f"No matching PDF found for {target_month} {target_year}")
+                    for link in pdf_links[:5]:
+                        LOGGER.info(f"  Available: {link['text'][:80]}")
+                else:
+                    LOGGER.warning(f"No PDF links found after expansion")
+
                 return None
 
             except Exception as e:
                 LOGGER.error(f"Error with Playwright: {e}")
+                import traceback
+                LOGGER.error(traceback.format_exc())
                 return None
             finally:
-                context.close()
                 browser.close()
 
     except Exception as e:
@@ -409,13 +419,9 @@ def main():
         if 'archive.org' in selected_candidate.url:
             success = download_pdf_via_requests(selected_candidate.url, str(output_pdf), args.timeout)
         else:
-            # For main website, try cloudscraper first (better for Akamai WAF)
-            success = download_pdf_via_cloudscraper(selected_candidate.url, str(output_pdf), args.timeout)
-
-        if not success and 'archive.org' not in selected_candidate.url:
-            # Fall back to Playwright for main website
-            LOGGER.info("Cloudscraper failed, trying Playwright...")
-            success = download_pdf_via_playwright(selected_candidate.url, str(output_pdf), args.timeout)
+            # For main website, use Firefox first (bypasses WAF)
+            LOGGER.info("Using Firefox to download from Manulife website...")
+            success = download_pdf_via_firefox(selected_candidate.url, str(output_pdf), args.timeout)
 
         if success and output_pdf.exists():
             file_size = output_pdf.stat().st_size
