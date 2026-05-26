@@ -158,6 +158,7 @@ def main():
     parser.add_argument("--discover-only", action="store_true", help="Stop after discovery")
     parser.add_argument("--force", action="store_true", help="Overwrite existing")
     parser.add_argument("--timeout", type=int, default=30, help="Timeout in seconds")
+    parser.add_argument("--debug-html", action="store_true", help="Save debug HTML files")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
