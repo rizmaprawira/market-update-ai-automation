@@ -19,6 +19,30 @@ COMPANY_ID = "pt_asuransi_raksa_pratikara"
 COMPANY_NAME = "PT Asuransi Raksa Pratikara"
 CATEGORY = "asuransi_umum"
 
+def fetch_raksa_with_dropdown_expansion(source_url, year, timeout):
+    """Fetch Raksa page with year dropdown expanded using Playwright."""
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+
+        try:
+            page.goto(source_url, wait_until="networkidle", timeout=timeout * 1000)
+
+            year_text = f"Laporan Keuangan {year}"
+            LOGGER.info(f"Clicking year dropdown for {year_text}")
+
+            year_button = page.locator(f"text={year_text}").first
+            year_button.click()
+
+            page.wait_for_timeout(1000)
+
+            html = page.content()
+            return html
+        finally:
+            browser.close()
+
 def discover_raksa_reports(html, base_url, year, month):
     """Raksa-specific: links only have month names, no year info. Case-insensitive matching."""
     from _downloader_base import MONTH_LABELS, PDFCandidate, month_terms
@@ -81,13 +105,9 @@ def main():
     LOGGER.info(f"Fetching from {SOURCE_URL}")
 
     try:
-        if args.use_browser:
-            LOGGER.info("Using Playwright browser rendering")
-            html, discovered_url = fetch_html_browser(SOURCE_URL, args.timeout)
-        else:
-            html, discovered_url, used_browser = fetch_html_with_smart_fallback(
-                session, SOURCE_URL, args.year, args.month, args.timeout
-            )
+        LOGGER.info("Using Playwright browser rendering with dropdown expansion")
+        html = fetch_raksa_with_dropdown_expansion(SOURCE_URL, args.year, args.timeout)
+        discovered_url = SOURCE_URL
     except Exception as e:
         reason = f"failed to fetch: {e}"
         LOGGER.error(reason)
