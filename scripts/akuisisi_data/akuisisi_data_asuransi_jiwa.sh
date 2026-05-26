@@ -43,12 +43,32 @@ log() {
   fi
 }
 
+get_company_timeout() {
+  local company="$1"
+  local config_file="config/timeout_settings.txt"
+  local default_timeout=35
+
+  if [[ ! -f "$config_file" ]]; then
+    echo "$default_timeout"
+    return
+  fi
+
+  # Look for company-specific timeout (ignore comments, empty lines)
+  local timeout=$(grep "^${company}|" "$config_file" 2>/dev/null | cut -d'|' -f2 | head -1)
+
+  if [[ -z "$timeout" ]]; then
+    echo "$default_timeout"
+  else
+    echo "$timeout"
+  fi
+}
+
 # Parse arguments
 TAHUN=""
 BULAN=""
 OUTPUT_ROOT="data"
-TIMEOUT=30
-DELAY_SEC=2
+TIMEOUT=60
+DELAY_SEC=3
 MAMBA_CACHE_HOME="/tmp/market-update-mamba-cache"
 MODE_RESUME=false
 MODE_FAIL_FAST=false
@@ -297,12 +317,18 @@ if [[ "$FLAG_SKIP_DOWNLOAD" != "true" ]]; then
       continue
     fi
 
+    # Get per-company timeout from config, or use provided TIMEOUT, or use default
+    company_timeout=$(get_company_timeout "$company_snake")
+    if [[ -n "$TIMEOUT" && "$TIMEOUT" != "60" ]]; then
+      company_timeout="$TIMEOUT"
+    fi
+
     cmd=(
       env XDG_CACHE_HOME="$MAMBA_CACHE_HOME" mamba run -n market_update python "$script_path"
       --year "$TAHUN"
       --month "$((10#$BULAN))"
       --output-root "$OUTPUT_ROOT"
-      --timeout "$TIMEOUT"
+      --timeout "$company_timeout"
     )
 
     [[ "$FLAG_FORCE" == "true" ]] && cmd+=(--force)

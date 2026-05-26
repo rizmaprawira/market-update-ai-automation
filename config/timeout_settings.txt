@@ -1,0 +1,42 @@
+# Per-Company Timeout Configuration for 2026-02 and beyond
+# Format: company_id|timeout_seconds|reason
+# DEFAULT: 60 seconds (for any company not listed)
+
+# JIWA - REGRESSED (use 20s to avoid anti-bot - THESE WORKED!)
+pt_aia_financial|20|regressed_adaptive_success
+pt_ajb_bumiputera_1912|20|regressed_adaptive_success
+pt_asuransi_allianz_life_indonesia|20|regressed_adaptive_success
+pt_bhinneka_life_indonesia|20|regressed_adaptive_success
+pt_central_asia_financial__jagadiri_|20|regressed_adaptive_success
+pt_chubb_life_insurance|20|regressed_adaptive_success
+pt_lippo_life_assurance|20|regressed_adaptive_success
+pt_mnc_life_assurance|20|regressed_adaptive_success
+pt_perta_life_insurance|20|regressed_adaptive_success
+
+# UMUM - REGRESSED (use 20s to avoid anti-bot)
+pt_asuransi_bhakti_bhayangkara|20|regressed_adaptive_success
+pt_asuransi_central_asia|20|regressed_adaptive_success
+pt_avrist_general_insurance|20|regressed_adaptive_success
+pt_kookmin_best_insurance_indonesia|20|regressed_adaptive_success
+pt_lippo_general_insurance_tbk|20|regressed_adaptive_success
+
+# JIWA - SLOW/COMPLEX (use 120s)
+pt_asuransi_jiwa_ifg|120|playwright_complex_slow
+pt_asuransi_jiwa_manulife_indonesia|120|slow_server
+pt_asuransi_jiwa_nasional|120|very_slow_site
+pt_asuransi_jiwa_sealnsure|120|slow_server
+pt_asuransi_jiwa_sequis_financial|120|slow_server
+pt_bni_life_insurance|120|slow_server
+pt_capital_life_indonesia|120|slow_server
+
+# UMUM - SLOW/COMPLEX (use 120s)
+pt_asuransi_allianz_utama_indonesia|120|slow_server
+pt_asuransi_asei_indonesia|120|slow_server
+pt_asuransi_digital_bersama_tbk|120|playwright_complex
+pt_asuransi_simas_insurtech|120|slow_server
+
+# Tugu - PERSISTENT FAILURE (try 120s + may need script update)
+pt_tugu_reasuransi_indonesia|120|persistent_timeout_needs_debug
+
+# DEFAULT for all others: 60 seconds
+# This is shown in get_company_timeout() function default
