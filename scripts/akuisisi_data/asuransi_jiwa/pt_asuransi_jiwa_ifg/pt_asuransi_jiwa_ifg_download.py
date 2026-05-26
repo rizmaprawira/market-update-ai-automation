@@ -88,14 +88,29 @@ def fetch_ifg_pdfs(year, month, timeout=30):
             # Extract all PDF URLs from page HTML
             pdf_urls = re.findall(r'https://[^\s"<>]+\.pdf', content)
 
-            # Filter by year and month
+            # Filter by year and month - be strict to avoid adjacent months
             month_keywords = [month_name[month].lower(), str(month).zfill(2), f"0{month}"]
-            matching_pdfs = [
-                url for url in pdf_urls
-                if str(year) in url and any(kw in url.lower() for kw in month_keywords)
-            ]
+            matching_pdfs = []
 
-            LOGGER.info(f"Found {len(matching_pdfs)} PDFs for {year}-{month:02d}")
+            for url in pdf_urls:
+                url_lower = url.lower()
+                # Must have year AND month
+                if str(year) not in url:
+                    continue
+                month_match = any(kw in url_lower for kw in month_keywords)
+                if not month_match:
+                    continue
+
+                # Additional check: ensure it's not an adjacent month
+                # Exclude previous month (month-1)
+                prev_month = (month - 2) % 12 + 1 if month > 1 else 12
+                prev_month_kw = [month_name[prev_month].lower(), str(prev_month).zfill(2)]
+                if any(kw in url_lower for kw in prev_month_kw):
+                    continue
+
+                matching_pdfs.append(url)
+
+            LOGGER.info(f"Found {len(matching_pdfs)} PDFs for {year}-{month:02d} (strict filtering to avoid adjacent months)")
 
             return content, SOURCE_URL, matching_pdfs if matching_pdfs else pdf_urls
         finally:

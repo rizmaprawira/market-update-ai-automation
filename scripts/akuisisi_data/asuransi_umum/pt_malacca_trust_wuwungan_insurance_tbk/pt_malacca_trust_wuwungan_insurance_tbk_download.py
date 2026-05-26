@@ -67,7 +67,23 @@ def main():
         }])
         return 1
     
+    # For mlacca_trust, we need stricter filtering to avoid wrong report types
     candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
+
+    # Filter out non-financial reports (annual reports, sustainability reports, etc.)
+    # Keep only monthly financial reports
+    filtered = []
+    for c in candidates:
+        text_lower = c.text.lower() + " " + c.url.lower()
+        # Exclude annual, sustainability, sustainability reports
+        if any(x in text_lower for x in ['tahunan', 'annual', 'keberlanjutan', 'sustainability']):
+            continue
+        # Prefer monthly/bulanan reports
+        if any(x in text_lower for x in ['bulanan', 'monthly']):
+            filtered.append(c)
+
+    # If no monthly reports found, use top candidates
+    candidates = filtered if filtered else candidates[:1]
     
     if not candidates:
         reason = "no PDF candidates found"

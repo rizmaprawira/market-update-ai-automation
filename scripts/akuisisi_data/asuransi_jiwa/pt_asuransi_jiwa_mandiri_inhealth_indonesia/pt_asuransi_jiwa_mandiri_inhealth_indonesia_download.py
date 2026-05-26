@@ -77,9 +77,13 @@ def fetch_mandiri_inhealth_pdfs(year, month, timeout=30):
             # Extract PDF URLs from page
             content = page.content()
             pdf_urls = re.findall(r'https://[^\s"<>]+\.pdf', content)
-            matching_pdfs = [url for url in pdf_urls if str(year) in url]
+            # Filter: must match year and exclude sustainability/laporan keberlanjutan
+            matching_pdfs = [
+                url for url in pdf_urls
+                if str(year) in url and 'keberlanjutan' not in url.lower() and 'sustainability' not in url.lower()
+            ]
 
-            LOGGER.info(f"Found {len(matching_pdfs)} PDFs for {year}")
+            LOGGER.info(f"Found {len(matching_pdfs)} monthly PDFs for {year} (filtered out sustainability reports)")
             return content, SOURCE_URL, matching_pdfs if matching_pdfs else pdf_urls
 
         finally:

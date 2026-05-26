@@ -66,7 +66,7 @@ def main():
     session.verify = False  # Disable SSL verification for Askrindo certificate issue
     period = f"{args.year:04d}-{args.month:02d}"
     output_dir = args.output_root / period / CATEGORY / COMPANY_ID
-    output_pdf = output_dir / f"{COMPANY_ID}_{args.year:04d}_{args.month:02d}.pdf"
+    output_file = output_dir / f"{COMPANY_ID}_{args.year:04d}_{args.month:02d}.png"
     debug_dir = output_dir / "_debug_html"
 
     LOGGER.info(f"Fetching from {SOURCE_URL} (SSL verification disabled due to cert issue)")
@@ -88,7 +88,7 @@ def main():
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": SOURCE_URL,
             "pdf_url": "", "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "error", "reason": reason,
+            "output_path": str(output_file), "status": "error", "reason": reason,
             "timestamp": current_timestamp()
         }])
         return 1
@@ -104,7 +104,7 @@ def main():
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
             "pdf_url": "", "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "not_found", "reason": reason,
+            "output_path": str(output_file), "status": "not_found", "reason": reason,
             "timestamp": current_timestamp()
         }])
         return 0
@@ -118,35 +118,34 @@ def main():
             "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
             "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
             "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "dry_run", "reason": "dry-run mode",
-            "timestamp": current_timestamp()
-        }])
-        return 0
-    
-    if output_pdf.exists() and not args.force:
-        LOGGER.info(f"PDF already exists at {output_pdf}")
-        write_manifest(output_dir, [{
-            "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
-            "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
-            "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
-            "output_path": str(output_pdf), "status": "skipped_existing", "reason": "file exists",
+            "output_path": str(output_file), "status": "dry_run", "reason": "dry-run mode",
             "timestamp": current_timestamp()
         }])
         return 0
 
-    # Keep stable output filename for pipeline compatibility, even if source is image.
-    output_file = output_pdf
+    if output_file.exists() and not args.force:
+        LOGGER.info(f"File already exists at {output_file}")
+        write_manifest(output_dir, [{
+            "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
+            "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
+            "pdf_url": selected_candidate.url, "target_year": args.year, "target_month": args.month,
+            "output_path": str(output_file), "status": "skipped_existing", "reason": "file exists",
+            "timestamp": current_timestamp()
+        }])
+        return 0
+
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     http_status, file_size = download_pdf(
         session, selected_candidate.url, output_file, timeout=args.timeout, force=args.force
     )
     success = True
     reason = (
-        f"downloaded conventional financial report PDF (http_status={http_status}, bytes={file_size})"
+        f"downloaded image report as PNG (http_status={http_status}, bytes={file_size})"
         if http_status is not None
-        else f"existing valid PDF was kept (bytes={file_size})"
+        else f"existing valid PNG was kept (bytes={file_size})"
     )
-    
+
     write_manifest(output_dir, [{
         "category": CATEGORY, "company_id": COMPANY_ID, "company_name": COMPANY_NAME,
         "source_page_url": SOURCE_URL, "discovered_page_url": discovered_url,
@@ -154,12 +153,12 @@ def main():
         "output_path": str(output_file), "status": "downloaded" if http_status is not None else "skipped_existing",
         "reason": reason, "timestamp": current_timestamp()
     }])
-    
+
     if success:
-        LOGGER.info(f"Successfully downloaded to {output_file}")
+        LOGGER.info(f"Successfully saved to {output_file}")
     else:
         LOGGER.error(f"Failed to download: {reason}")
-    
+
     return 0 if success else 1
 
 if __name__ == "__main__":
