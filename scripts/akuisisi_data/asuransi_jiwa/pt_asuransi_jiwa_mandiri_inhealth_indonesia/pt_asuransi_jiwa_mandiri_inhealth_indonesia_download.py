@@ -24,7 +24,7 @@ COMPANY_NAME = "PT Asuransi Jiwa Mandiri Inhealth Indonesia"
 CATEGORY = "asuransi_jiwa"
 
 def fetch_mandiri_inhealth_pdfs(year, month, timeout=30):
-    """Fetch Mandiri InHealth PDFs using Playwright dropdown selection."""
+    """Fetch Mandiri InHealth monthly PDF using JSON data extraction."""
     if sync_playwright is None:
         raise RuntimeError("Playwright not installed; pip install playwright && playwright install chromium")
 
@@ -35,56 +35,78 @@ def fetch_mandiri_inhealth_pdfs(year, month, timeout=30):
         try:
             page.goto(SOURCE_URL, wait_until="domcontentloaded", timeout=timeout * 1000)
 
-            # Close banner popup
-            close_btn = page.query_selector("button[aria-label*='close' i]")
-            if close_btn:
-                LOGGER.info("Closing popup banner")
-                close_btn.click(force=True)
-                page.wait_for_timeout(500)
+            # Wait for the financial reports section to load
+            # The page loads data via JavaScript, so we need to wait for it
+            try:
+                page.wait_for_function(
+                    'document.documentElement.innerHTML.includes("Bulanan")',
+                    timeout=timeout * 1000
+                )
+                LOGGER.debug("Found Bulanan section in rendered page")
+            except Exception as e:
+                LOGGER.warning(f"Timeout waiting for Bulanan section: {e}")
 
-            # Click first dropdown to see monthly reports
-            dropdown = page.query_selector("[role='combobox']")
-            if dropdown:
-                LOGGER.info("Opening dropdown for month selection")
-                dropdown.click()
-                page.wait_for_timeout(1000)
+            # Additional wait for content to settle
+            page.wait_for_timeout(2000)
 
-                # Find the option for the target month
-                month_name_id = month_name[month].lower()
-                target_month_indo = {
-                    'january': 'januari', 'february': 'februari', 'march': 'maret',
-                    'april': 'april', 'may': 'mei', 'june': 'juni',
-                    'july': 'juli', 'august': 'agustus', 'september': 'september',
-                    'october': 'oktober', 'november': 'november', 'december': 'desember'
-                }.get(month_name_id, month_name_id)
-
-                # Look for option matching the month and year
-                options = page.query_selector_all("[role='option']")
-                LOGGER.info(f"Found {len(options)} options in dropdown")
-
-                selected_option = None
-                for opt in options:
-                    opt_text = opt.text_content().strip().lower()
-                    if str(year) in opt_text and target_month_indo in opt_text:
-                        selected_option = opt
-                        LOGGER.info(f"Found matching option: {opt.text_content().strip()}")
-                        break
-
-                if selected_option:
-                    selected_option.click()
-                    page.wait_for_timeout(2000)
-
-            # Extract PDF URLs from page
+            # Get page content
             content = page.content()
-            pdf_urls = re.findall(r'https://[^\s"<>]+\.pdf', content)
-            # Filter: must match year and exclude sustainability/laporan keberlanjutan
-            matching_pdfs = [
-                url for url in pdf_urls
-                if str(year) in url and 'keberlanjutan' not in url.lower() and 'sustainability' not in url.lower()
-            ]
 
-            LOGGER.info(f"Found {len(matching_pdfs)} monthly PDFs for {year} (filtered out sustainability reports)")
-            return content, SOURCE_URL, matching_pdfs if matching_pdfs else pdf_urls
+            # Extract monthly reports from the embedded JSON data
+            import re
+
+            # The page has heavily escaped JSON data. Look for fileUrl entries with "bulanan"
+            # Pattern: \"fileUrl\":\"laporan_keuangan_mandiri_inhealth_bulanan_[month]_[year]_*.pdf\"
+
+            # Build month name
+            month_name_id = month_name[month].lower()
+            target_month_indo = {
+                'january': 'januari', 'february': 'februari', 'march': 'maret',
+                'april': 'april', 'may': 'mei', 'june': 'juni',
+                'july': 'juli', 'august': 'agustus', 'september': 'september',
+                'october': 'oktober', 'november': 'november', 'december': 'desember'
+            }.get(month_name_id, month_name_id)
+
+            LOGGER.info(f"Looking for monthly report: {target_month_indo} {year}")
+
+            # Search for fileUrl with bulanan keyword and matching month/year
+            # Handle both escaped and unescaped versions
+            pattern = rf'fileUrl[\\]*["\:]*[\\]*["\:]*laporan_keuangan_mandiri_inhealth_bulanan[^"\\]*?{target_month_indo}[^"\\]*?{year}[^"\\]*?\.pdf'
+            matches = re.finditer(pattern, content, re.IGNORECASE)
+
+            matching_pdfs = []
+            seen = set()
+
+            for match in matches:
+                # Extract just the filename from the match
+                full_match = match.group(0)
+                # Extract PDF filename (after the last / or the actual filename)
+                filename_match = re.search(r'(laporan_keuangan[^"\\]*\.pdf)', full_match, re.IGNORECASE)
+                if filename_match:
+                    filename = filename_match.group(1)
+                    if filename not in seen:
+                        seen.add(filename)
+                        LOGGER.info(f"Found matching monthly report: {filename}")
+                        # Construct full URL
+                        pdf_url = f"https://www.inhealth.co.id/api/cms/preview/{filename}"
+                        matching_pdfs.append(pdf_url)
+
+            if matching_pdfs:
+                LOGGER.info(f"Found {len(matching_pdfs)} matching monthly PDFs")
+            else:
+                LOGGER.warning(f"No monthly reports found for {target_month_indo} {year}")
+                # Try a simpler pattern if the first didn't work
+                simple_pattern = rf'bulanan[^"\\]*{target_month_indo}[^"\\]*{year}[^"\\]*\.pdf'
+                simple_matches = re.finditer(simple_pattern, content, re.IGNORECASE)
+                for match in simple_matches:
+                    filename = match.group(0)
+                    if filename not in seen and 'bulanan' in filename.lower():
+                        seen.add(filename)
+                        LOGGER.info(f"Found via simpler pattern: {filename}")
+                        pdf_url = f"https://www.inhealth.co.id/api/cms/preview/{filename}"
+                        matching_pdfs.append(pdf_url)
+
+            return content, SOURCE_URL, matching_pdfs if matching_pdfs else []
 
         finally:
             browser.close()

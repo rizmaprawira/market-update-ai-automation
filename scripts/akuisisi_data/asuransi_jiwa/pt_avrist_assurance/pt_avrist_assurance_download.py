@@ -3,7 +3,10 @@ import argparse
 import logging
 import sys
 import time
+import re
 from pathlib import Path
+from calendar import month_name
+from bs4 import BeautifulSoup
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _downloader_base import (
@@ -21,6 +24,43 @@ SOURCE_URL = "https://www.avrist.com/tentang-avrist-life/tentang-avrist-life?tab
 COMPANY_ID = "pt_avrist_assurance"
 COMPANY_NAME = "PT Avrist Assurance"
 CATEGORY = "asuransi_jiwa"
+
+def extract_avrist_monthly_pdfs(html, year, month):
+    """Extract only monthly (not annual) PDF links from Avrist page."""
+    soup = BeautifulSoup(html, 'html.parser')
+    monthly_pdfs = []
+
+    for link in soup.find_all('a'):
+        href = link.get('href', '').strip()
+        if not href:
+            continue
+
+        link_text = link.get_text(strip=True).lower()
+        parent_text = link.parent.get_text(strip=True).lower() if link.parent else ""
+        full_text = (link_text + " " + parent_text).lower()
+
+        # Must be PDF
+        if not (href.endswith('.pdf') or '.pdf' in href):
+            continue
+
+        # Exclude sustainability/sustainability reports
+        if 'keberlanjutan' in full_text or 'sustainability' in full_text:
+            continue
+
+        # Exclude annual reports (tahunan)
+        if 'tahunan' in full_text or 'annual' in full_text:
+            continue
+
+        # Look for monthly indicators OR recent year match
+        has_monthly = 'bulanan' in full_text or 'monthly' in full_text
+        has_year = str(year) in full_text or str(year) in href
+
+        # Include if it has "bulanan" label, or if it has the target year and no "annual" keyword
+        if has_monthly or has_year:
+            monthly_pdfs.append(href)
+            LOGGER.debug(f"Accepted: {link_text[:60]} -> {href[:80]}")
+
+    return monthly_pdfs
 
 def fetch_avrist_pdfs_fast(url, timeout=30):
     """Fetch Avrist PDFs with careful timing for dynamic Next.js content."""
@@ -86,8 +126,21 @@ def main():
             "timestamp": current_timestamp()
         }])
         return 1
-    
-    candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
+
+    # Extract monthly (not annual) PDFs
+    pdf_urls = extract_avrist_monthly_pdfs(html, args.year, args.month)
+
+    if not pdf_urls:
+        # Fallback to generic extraction if custom filter finds nothing
+        LOGGER.info("No monthly PDFs found with strict filter, trying generic extraction")
+        candidates = extract_pdf_links(html, discovered_url, args.year, args.month)
+    else:
+        # Wrap URLs in candidate objects for compatibility
+        class PDFCandidate:
+            def __init__(self, url, text):
+                self.url = url
+                self.text = text
+        candidates = [PDFCandidate(url=pdf_urls[0], text=f"Monthly PDF")]
     
     if not candidates:
         reason = "no PDF candidates found"
