@@ -20,32 +20,38 @@ COMPANY_NAME = "PT Asuransi Asei Indonesia"
 CATEGORY = "asuransi_umum"
 
 def extract_asei_pdfs(html, base_url, year, month):
-    """Custom extraction with strict month/year validation."""
+    """Custom extraction matching filename pattern Laporan-Publikasi_{month}_{year}_website.pdf"""
     soup = BeautifulSoup(html, 'html.parser')
     candidates = []
-
-    month_names = MONTH_NAMES.get(month, [])
-    month_names_lower = [m.lower() for m in month_names]
 
     for link in soup.find_all('a'):
         href = link.get('href', '').strip()
         if not href or not href.lower().endswith('.pdf'):
             continue
 
-        text = link.get_text(strip=True).lower()
         url = urljoin(base_url, href)
-        full_text = (text + " " + url.lower()).lower()
 
-        # Strict month matching: must contain full month name
-        has_month = any(month_name in full_text for month_name in month_names_lower)
-        has_year = str(year) in full_text
+        # Parse filename pattern: Laporan-Publikasi_M_YYYY_website.pdf
+        # where M is the month number (1-12)
+        filename = url.split('/')[-1].lower()
+        if 'laporan-publikasi' not in filename:
+            continue
 
-        if has_month and has_year:
-            candidates.append({
-                'url': url,
-                'text': link.get_text(strip=True),
-                'score': 100
-            })
+        try:
+            # Extract pattern: Laporan-Publikasi_{month}_{year}_website.pdf
+            parts = filename.replace('laporan-publikasi_', '').replace('_website.pdf', '').split('_')
+            if len(parts) >= 2:
+                file_month = int(parts[0])
+                file_year = int(parts[1])
+
+                if file_month == month and file_year == year:
+                    candidates.append({
+                        'url': url,
+                        'text': link.get_text(strip=True),
+                        'score': 100
+                    })
+        except (ValueError, IndexError):
+            continue
 
     return sorted(candidates, key=lambda x: x['score'], reverse=True)
 
