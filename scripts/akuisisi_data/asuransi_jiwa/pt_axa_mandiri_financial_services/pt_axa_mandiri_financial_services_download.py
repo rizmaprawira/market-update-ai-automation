@@ -21,38 +21,44 @@ COMPANY_NAME = "PT AXA Mandiri Financial Services"
 CATEGORY = "asuransi_jiwa"
 
 def extract_axa_mandiri_pdfs(html, base_url, year, month):
-    """Custom extraction for AXA Mandiri with flexible matching."""
+    """Extract PDFs from AXA Mandiri - matches financial reports or market updates by date."""
     soup = BeautifulSoup(html, 'html.parser')
     candidates = []
 
     month_names = MONTH_NAMES.get(month, [])
     month_names_lower = [m.lower() for m in month_names]
 
+    # Normalize month label
+    month_labels = {
+        1: "januari", 2: "februari", 3: "maret", 4: "april", 5: "mei",
+        6: "juni", 7: "juli", 8: "agustus", 9: "september",
+        10: "oktober", 11: "november", 12: "desember"
+    }
+    month_label = month_labels.get(month, "").lower()
+
     for link in soup.find_all('a'):
         href = link.get('href', '').strip()
-        if not href or not href.lower().endswith('.pdf'):
+        if not href:
+            continue
+
+        # Check if href points to a PDF (with or without query parameters)
+        href_lower = href.lower()
+        if '.pdf' not in href_lower:
             continue
 
         text = link.get_text(strip=True).lower()
         url = urljoin(base_url, href)
-        full_text = (text + " " + url.lower()).lower()
+        # Use URL for matching instead of text for better month detection
+        match_text = url.lower()
 
-        # Check if PDF looks like a financial report
-        is_financial = any(term in full_text for term in ['laporan', 'keuangan', 'financial', 'report'])
-        has_month = any(month_name in full_text for month_name in month_names_lower)
-        has_year = str(year) in full_text
+        # Look for month and year in URL path/filename
+        has_month = any(f"-{m}-" in match_text or f"_{m}_" in match_text or f" {m} " in match_text
+                       or match_text.endswith(m) or match_text.startswith(m)
+                       for m in month_names_lower) or month_label in match_text
+        has_year = str(year) in match_text
 
-        score = 0
         if has_month and has_year:
             score = 100
-        elif is_financial and has_year and has_month:
-            score = 90
-        elif is_financial and has_year:
-            score = 50
-        elif has_month and has_year:
-            score = 80
-
-        if score > 0:
             candidates.append({
                 'url': url,
                 'text': link.get_text(strip=True),
