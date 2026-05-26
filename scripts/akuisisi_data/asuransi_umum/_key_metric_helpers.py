@@ -5,6 +5,21 @@ from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 
 
+# Standard OJK label patterns for asuransi_umum — fallback when company-specific keywords fail
+STANDARD_UMUM_FALLBACKS = {
+    "aset":                    [r"Total Aset\b"],
+    "ekuitas":                 [r"V\. Ekuitas", r"IV\. Ekuitas"],
+    "pendapatan_premi":        [r"Pendapatan Premi\b"],
+    "premi_bruto":             [r"Premi Bruto\b"],
+    "premi_reasuransi":        [r"Premi Reasuransi\b"],
+    "premi_neto":              [r"Premi Neto\b", r"Premi Netto\b", r"Premi-Neto\b"],
+    "hasil_underwriting":      [r"Hasil Underwriting\b", r"Hasil Underwriting Bersih\b"],
+    "laba_rugi_komprehensif":  [r"Total Laba.*Komprehensif", r"\bLaba Komprehensif\b"],
+    "rasio_solvabilitas":      [r"Rasio Pencapaian \(%\)", r"Rasio Pencapaian \(dalam %\)"],
+    "rasio_likuiditas":        [],
+}
+
+
 def get_period_dir(output_root: str = "data", yyyy: int = 2026, mm: int = 1) -> Path:
     """Get period directory, respecting custom output_root."""
     return Path(output_root) / f"{yyyy}-{mm:02d}"
@@ -13,6 +28,7 @@ def get_period_dir(output_root: str = "data", yyyy: int = 2026, mm: int = 1) -> 
 def extract_two_numbers_semantic(
     text: str,
     keywords: List[str],
+    field_name: Optional[str] = None,
 ) -> Tuple[Optional[str], Optional[str]]:
     """
     Extract two numbers from text based on keyword patterns (semantic search).
@@ -23,6 +39,7 @@ def extract_two_numbers_semantic(
     Args:
         text: Full text to search
         keywords: List of keyword patterns to try (in priority order)
+        field_name: Optional field name for auto-applying standard OJK fallbacks
 
     Returns:
         Tuple of (current_period_value, previous_period_value) or (None, None)
@@ -63,11 +80,18 @@ def extract_two_numbers_semantic(
         except Exception:
             return None, None
 
-    # Try each keyword pattern in order
+    # Try each company-specific keyword pattern in order
     for keyword in keywords:
         val1, val2 = extract_numbers_after_keyword(keyword)
         if val1 is not None and val2 is not None:
             return val1, val2
+
+    # If still no match and field_name is provided, try standard OJK fallback patterns
+    if field_name and field_name in STANDARD_UMUM_FALLBACKS:
+        for keyword in STANDARD_UMUM_FALLBACKS[field_name]:
+            val1, val2 = extract_numbers_after_keyword(keyword)
+            if val1 is not None and val2 is not None:
+                return val1, val2
 
     return None, None
 

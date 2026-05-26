@@ -25,10 +25,10 @@ COLUMNS = [
 ]
 
 
-def extract_two_numbers(text: str, keywords):
+def extract_two_numbers(text: str, keywords, field=None):
     if isinstance(keywords, str):
         keywords = [keywords]
-    return extract_two_numbers_semantic(text, keywords)
+    return extract_two_numbers_semantic(text, keywords, field_name=field)
 
 def main():
     parser = argparse.ArgumentParser(description="Extract Allianz metrics from TXT file")
@@ -52,15 +52,15 @@ def main():
 
     # Keywords dari laporan keuangan Allianz 2026-04
     # Note: Allianz report format has April 2025 in first column, April 2026 in second
-    aset_2025, aset_2026 = extract_two_numbers(text, [r"Jumlah Aset", r"Total Assets", r"JUMLAH ASET"])
-    ekuitas_2025, ekuitas_2026 = extract_two_numbers(text, [r"Jumlah Ekuitas", r"Total Equity", r"TOTAL EKUITAS"])
-    pend_premi_2025, pend_premi_2026 = extract_two_numbers(text, [r"Jumlah Pendapatan Premi", r"Total Premiums Income"])
-    premi_reasu_2025, premi_reasu_2026 = extract_two_numbers(text, [r"Jumlah Premi Reasuransi"])
-    premi_neto_2025, premi_neto_2026 = extract_two_numbers(text, [r"Jumlah Pendapatan Premi", r"Total Premiums Income"])
-    hasil_uw_2025, hasil_uw_2026 = extract_two_numbers(text, [r"HASIL UNDERWRITING", r"UNDERWRITING INCOME", r"Hasil Investasi"])
-    laba_komp_2025, laba_komp_2026 = extract_two_numbers(text, [r"TOTAL LABA.*KOMPREHENSIF", r"TOTAL COMPREHENSIVE INCOME"])
-    solv_2025, solv_2026 = extract_two_numbers(text, [r"Rasio Pencapaian Solvabilitas", r"Solvency Margin Ratio"])
-    lik_2025, lik_2026 = extract_two_numbers(text, [r"Rasio Likuiditas", r"Liquidity Ratio"])
+    aset_2025, aset_2026 = extract_two_numbers(text, [r"Jumlah Aset", r"Total Assets", r"JUMLAH ASET"], "aset")
+    ekuitas_2025, ekuitas_2026 = extract_two_numbers(text, [r"Jumlah Ekuitas", r"Total Equity", r"TOTAL EKUITAS"], "ekuitas")
+    pend_premi_2025, pend_premi_2026 = extract_two_numbers(text, [r"Jumlah Pendapatan Premi", r"Total Premiums Income"], "pendapatan_premi")
+    premi_reasu_2025, premi_reasu_2026 = extract_two_numbers(text, [r"Jumlah Premi Reasuransi"], "premi_reasuransi")
+    premi_neto_2025, premi_neto_2026 = extract_two_numbers(text, [r"Jumlah Pendapatan Premi", r"Total Premiums Income"], "premi_neto")
+    hasil_uw_2025, hasil_uw_2026 = extract_two_numbers(text, [r"HASIL UNDERWRITING", r"UNDERWRITING INCOME", r"Hasil Investasi"], "hasil_underwriting")
+    laba_komp_2025, laba_komp_2026 = extract_two_numbers(text, [r"TOTAL LABA.*KOMPREHENSIF", r"TOTAL COMPREHENSIVE INCOME"], "laba_rugi_komprehensif")
+    solv_2025, solv_2026 = extract_two_numbers(text, [r"Rasio Pencapaian Solvabilitas", r"Solvency Margin Ratio"], "rasio_solvabilitas")
+    lik_2025, lik_2026 = extract_two_numbers(text, [r"Rasio Likuiditas", r"Liquidity Ratio"], "rasio_likuiditas")
 
     current_period = f"{args.yyyy}-{args.mm:02d}"
     prev_year = args.yyyy - 1

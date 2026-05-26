@@ -6,10 +6,10 @@ from _key_metric_helpers import upsert_database_csv, extract_two_numbers_semanti
 
 COLUMNS = ["periode", "jenis_asuransi", "nama_perusahaan", "aset", "ekuitas", "pendapatan_premi", "premi_bruto", "premi_reasuransi", "premi_neto", "hasil_underwriting", "laba_rugi_komprehensif", "rasio_solvabilitas", "rasio_likuiditas"]
 
-def extract_two_numbers(text: str, keywords):
+def extract_two_numbers(text: str, keywords, field=None):
     if isinstance(keywords, str):
         keywords = [keywords]
-    return extract_two_numbers_semantic(text, keywords)
+    return extract_two_numbers_semantic(text, keywords, field_name=field)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -28,16 +28,16 @@ def main():
     text = INPUT_TXT.read_text(encoding="utf-8", errors="ignore")
     text = re.sub(r"\s+", " ", text)
 
-    aset_2026, aset_prev = extract_two_numbers(text, [r"Jumlah Aset", r"Total Assets", r"JUMLAH ASET"])
-    ekuitas_2026, ekuitas_prev = extract_two_numbers(text, [r"Jumlah Ekuitas", r"Total Equity", r"TOTAL EKUITAS"])
-    pend_premi_2026, pend_premi_prev = extract_two_numbers(text, [r"Jumlah Pendapatan Premi", r"Total Premiums Income"])
-    premi_bruto_2026, premi_bruto_prev = extract_two_numbers(text, [r"Jumlah Premi Bruto", r"Total Gross Premiums"])
-    premi_reasu_2026, premi_reasu_prev = extract_two_numbers(text, [r"Jumlah Premi Reasuransi"])
-    premi_neto_2026, premi_neto_prev = extract_two_numbers(text, [r"Jumlah Premi Neto", r"Total Net Premiums"])
-    hasil_uw_2026, hasil_uw_prev = extract_two_numbers(text, [r"HASIL UNDERWRITING", r"UNDERWRITING INCOME"])
-    laba_komp_2026, laba_komp_prev = extract_two_numbers(text, [r"TOTAL LABA.*KOMPREHENSIF", r"TOTAL COMPREHENSIVE INCOME"])
-    solv_2026, solv_prev = extract_two_numbers(text, [r"Rasio Pencapaian Solvabilitas", r"Solvency Margin Ratio"])
-    lik_2026, lik_prev = extract_two_numbers(text, [r"Rasio Likuiditas", r"Liquidity Ratio"])
+    aset_2026, aset_prev = extract_two_numbers(text, [r"Jumlah Aset", r"Total Assets", r"JUMLAH ASET"], "aset")
+    ekuitas_2026, ekuitas_prev = extract_two_numbers(text, [r"Jumlah Ekuitas", r"Total Equity", r"TOTAL EKUITAS"], "ekuitas")
+    pend_premi_2026, pend_premi_prev = extract_two_numbers(text, [r"Jumlah Pendapatan Premi", r"Total Premiums Income"], "pendapatan_premi")
+    premi_bruto_2026, premi_bruto_prev = extract_two_numbers(text, [r"Jumlah Premi Bruto", r"Total Gross Premiums"], "premi_bruto")
+    premi_reasu_2026, premi_reasu_prev = extract_two_numbers(text, [r"Jumlah Premi Reasuransi"], "premi_reasuransi")
+    premi_neto_2026, premi_neto_prev = extract_two_numbers(text, [r"Jumlah Premi Neto", r"Total Net Premiums"], "premi_neto")
+    hasil_uw_2026, hasil_uw_prev = extract_two_numbers(text, [r"HASIL UNDERWRITING", r"UNDERWRITING INCOME"], "hasil_underwriting")
+    laba_komp_2026, laba_komp_prev = extract_two_numbers(text, [r"TOTAL LABA.*KOMPREHENSIF", r"TOTAL COMPREHENSIVE INCOME"], "laba_rugi_komprehensif")
+    solv_2026, solv_prev = extract_two_numbers(text, [r"Rasio Pencapaian Solvabilitas", r"Solvency Margin Ratio"], "rasio_solvabilitas")
+    lik_2026, lik_prev = extract_two_numbers(text, [r"Rasio Likuiditas", r"Liquidity Ratio"], "rasio_likuiditas")
 
     current_period = f"{args.yyyy}-{args.mm:02d}"
     rows = [{
